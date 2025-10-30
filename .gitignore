@@ -6,6 +6,7 @@
 
 # Large data files (you may want to adjust based on your needs)
 *.mat
+*.csv
 
 # Figure files (optional - comment out if you want to track these)
 *.fig
@@ -13,6 +14,7 @@
 # Large image files (optional)
 *.png
 *.jpg
+*.svg
 
 # Temporary files
 *.tmp
