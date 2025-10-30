@@ -1,6 +1,7 @@
 %% ========================================================================
 %  BEHAVIORAL PERCENTAGE ANALYSIS: Period × Behavior × SessionType
 %  Session-level aggregation (one percentage per session/period/behavior)
+%  MODIFIED: Plots individual session data instead of predicted values
 %  ========================================================================
 %
 %  Analysis: Percentage ~ Period × Behavior × SessionType (Aversive/Reward)
@@ -299,49 +300,7 @@ catch ME
 end
 
 %% ========================================================================
-%  SECTION 7: GET PREDICTIONS FOR VISUALIZATION
-%  ========================================================================
-
-fprintf('\n=== GENERATING PREDICTIONS FOR VISUALIZATION ===\n');
-
-% Create prediction grid: 4 periods × 7 behaviors × 2 session types
-n_pred_total = 2 * config.n_behaviors * 4;  % = 56 predictions
-pred_session = ones(n_pred_total, 1);
-pred_period = zeros(n_pred_total, 1);
-pred_behavior = zeros(n_pred_total, 1);
-pred_sessiontype = cell(n_pred_total, 1);
-session_type_names = {'Aversive', 'Reward'};
-
-idx = 1;
-for st = 1:2
-    for b = 1:config.n_behaviors
-        for p = 1:4
-            pred_period(idx) = p;
-            pred_behavior(idx) = b;
-            pred_sessiontype{idx} = session_type_names{st};
-            idx = idx + 1;
-        end
-    end
-end
-
-% Create prediction table
-pred_grid = table(categorical(pred_session), ...
-                  categorical(pred_period), ...
-                  categorical(pred_behavior, 1:7, config.behavior_names), ...
-                  categorical(pred_sessiontype), ...
-                  'VariableNames', {'Session', 'Period', 'Behavior', 'SessionType'});
-
-% Get predictions
-[pred_full, pred_CI] = predict(lme_full, pred_grid, 'Conditional', false);
-
-% Reshape to [period × behavior × session_type]
-pred_array = reshape(pred_full, 4, config.n_behaviors, 2);
-
-fprintf('✓ Generated predictions: %d data points\n', length(pred_full));
-fprintf('  Reshaped to: [4 periods × 7 behaviors × 2 session types]\n\n');
-
-%% ========================================================================
-%  SECTION 8: EXTRACT PERIOD-SPECIFIC SIGNIFICANCE
+%  SECTION 7: EXTRACT PERIOD-SPECIFIC SIGNIFICANCE
 %  ========================================================================
 
 fprintf('=== TESTING PERIOD × SESSIONTYPE INTERACTION BY BEHAVIOR ===\n\n');
@@ -402,10 +361,14 @@ for b = 1:config.n_behaviors
 end
 
 %% ========================================================================
-%  SECTION 9: VISUALIZE - Three-way interaction plot
+%  SECTION 8: VISUALIZE - Individual session data with mean lines
 %  ========================================================================
 
-fprintf('Creating visualization...\n');
+fprintf('Creating visualization with individual session data...\n');
+
+% Define colors
+color_aversive = [0.8, 0.2, 0.2];  % Red
+color_reward = [0.2, 0.6, 0.2];    % Green
 
 figure('Position', [50, 50, 1800, 1000]);
 
@@ -413,33 +376,108 @@ ax = [];
 for b = 1:config.n_behaviors
     ax(end+1) = subplot(3, 3, b);
     hold on;
-
-    % Plot Aversive line (red circles)
-    h_av = plot(1:4, pred_array(:, b, 1), 'o-', ...
-                'LineWidth', 2.5, 'MarkerSize', 8, ...
-                'Color', [0.8, 0.2, 0.2], ...
-                'MarkerFaceColor', [0.8, 0.2, 0.2], ...
-                'DisplayName', 'Aversive');
-
-    % Plot Reward line (green squares)
-    h_rw = plot(1:4, pred_array(:, b, 2), 's-', ...
-                'LineWidth', 2.5, 'MarkerSize', 8, ...
-                'Color', [0.2, 0.6, 0.2], ...
-                'MarkerFaceColor', [0.2, 0.6, 0.2], ...
-                'DisplayName', 'Reward');
-
+    
+    % Extract data for this behavior
+    behavior_mask = tbl.Behavior == config.behavior_names{b};
+    behavior_data = tbl(behavior_mask, :);
+    
+    % Plot individual aversive sessions
+    aversive_mask = behavior_data.SessionType == 'Aversive';
+    aversive_sessions = unique(behavior_data.Session(aversive_mask));
+    
+    for s = 1:length(aversive_sessions)
+        sess_mask = behavior_data.Session == aversive_sessions(s) & aversive_mask;
+        sess_data = behavior_data(sess_mask, :);
+        
+        % Sort by period
+        [~, sort_idx] = sort(double(sess_data.Period));
+        periods = double(sess_data.Period(sort_idx));
+        percentages = sess_data.Percentage(sort_idx);
+        
+        % Plot with transparency
+        plot(periods, percentages, 'o-', ...
+             'Color', [color_aversive, 0.3], ...
+             'LineWidth', 1, ...
+             'MarkerSize', 4, ...
+             'MarkerFaceColor', [color_aversive, 0.3], ...
+             'HandleVisibility', 'off');
+    end
+    
+    % Plot individual reward sessions
+    reward_mask = behavior_data.SessionType == 'Reward';
+    reward_sessions = unique(behavior_data.Session(reward_mask));
+    
+    for s = 1:length(reward_sessions)
+        sess_mask = behavior_data.Session == reward_sessions(s) & reward_mask;
+        sess_data = behavior_data(sess_mask, :);
+        
+        % Sort by period
+        [~, sort_idx] = sort(double(sess_data.Period));
+        periods = double(sess_data.Period(sort_idx));
+        percentages = sess_data.Percentage(sort_idx);
+        
+        % Plot with transparency
+        plot(periods, percentages, 's-', ...
+             'Color', [color_reward, 0.3], ...
+             'LineWidth', 1, ...
+             'MarkerSize', 4, ...
+             'MarkerFaceColor', [color_reward, 0.3], ...
+             'HandleVisibility', 'off');
+    end
+    
+    % Calculate and plot mean lines
+    mean_aversive = zeros(4, 1);
+    mean_reward = zeros(4, 1);
+    
+    for p = 1:4
+        period_mask = double(behavior_data.Period) == p;
+        
+        % Aversive mean
+        aversive_period_data = behavior_data.Percentage(period_mask & aversive_mask);
+        if ~isempty(aversive_period_data)
+            mean_aversive(p) = mean(aversive_period_data);
+        else
+            mean_aversive(p) = NaN;
+        end
+        
+        % Reward mean
+        reward_period_data = behavior_data.Percentage(period_mask & reward_mask);
+        if ~isempty(reward_period_data)
+            mean_reward(p) = mean(reward_period_data);
+        else
+            mean_reward(p) = NaN;
+        end
+    end
+    
+    % Plot mean lines (thick, opaque)
+    h_av = plot(1:4, mean_aversive, 'o-', ...
+                'LineWidth', 3, 'MarkerSize', 10, ...
+                'Color', color_aversive, ...
+                'MarkerFaceColor', color_aversive, ...
+                'DisplayName', 'Aversive (mean)');
+    
+    h_rw = plot(1:4, mean_reward, 's-', ...
+                'LineWidth', 3, 'MarkerSize', 10, ...
+                'Color', color_reward, ...
+                'MarkerFaceColor', color_reward, ...
+                'DisplayName', 'Reward (mean)');
+    
     % Get y-axis limits for star placement
-    y_vals = pred_array(:, b, :);
-    y_min = min(y_vals(:));
-    y_max = max(y_vals(:));
+    all_percentages = behavior_data.Percentage;
+    y_min = min(all_percentages);
+    y_max = max(all_percentages);
     y_range = y_max - y_min;
-
+    
+    if y_range == 0
+        y_range = 1;
+    end
+    
     % Add significance stars for each period (P2, P3, P4)
     star_y = y_max + 0.15 * y_range;  % Position stars above data
-
+    
     for p = 2:4  % Periods 2, 3, 4 (Period 1 is reference)
         p_val = period_pvals(b, p - 1);
-
+        
         if ~isnan(p_val)
             if p_val < 0.001
                 star_text = '***';
@@ -457,7 +495,7 @@ for b = 1:config.n_behaviors
                 star_text = '';
                 star_size = 0;
             end
-
+            
             % Plot star if significant
             if ~isempty(star_text)
                 text(p, star_y, star_text, ...
@@ -469,30 +507,30 @@ for b = 1:config.n_behaviors
             end
         end
     end
-
+    
     % Title - red if any period is significant
     title_str = config.behavior_names{b};
     title_color = 'k';
-
+    
     if any(period_pvals(b, :) < 0.05)
         title_color = 'r';
     end
-
+    
     title(title_str, 'FontSize', 13, 'FontWeight', 'bold', 'Color', title_color);
-
+    
     % Formatting
     xlabel('Period', 'FontSize', 11);
     ylabel('Percentage (%)', 'FontSize', 11);
     xticks(1:4);
     xticklabels({'P1', 'P2', 'P3', 'P4'});
-
+    
     % Adjust y-limits to accommodate stars
-    ylim([y_min - 0.1 * y_range, y_max + 0.25 * y_range]);
-
+    ylim([max(0, y_min - 0.1 * y_range), y_max + 0.25 * y_range]);
+    
     if b == 1
         legend([h_av, h_rw], 'Location', 'northwest', 'FontSize', 10);
     end
-
+    
     grid on;
     set(gca, 'FontSize', 10);
     hold off;
@@ -502,10 +540,13 @@ end
 linkaxes(ax, 'xy');
 
 % Add overall title
-sgtitle({'Behavioral Percentages: Period × Behavior × SessionType', ...
-         'Stars above each period indicate significant Period×SessionType interaction for that behavior', ...
-         '* p<0.05, ** p<0.01, *** p<0.001'}, ...
+sgtitle({'Behavioral Percentages: Individual Sessions with Mean Lines', ...
+         'Transparent lines = individual sessions; Thick lines = group means', ...
+         'Stars: * p<0.05, ** p<0.01, *** p<0.001 (Period×SessionType interaction)'}, ...
         'FontSize', 15, 'FontWeight', 'bold');
 
-fprintf('✓ Visualization complete\n\n');
+fprintf('✓ Visualization complete\n');
+fprintf('  Plotted %d aversive sessions (red circles)\n', length(aversive_sessions));
+fprintf('  Plotted %d reward sessions (green squares)\n\n', length(reward_sessions));
+
 fprintf('=== ANALYSIS COMPLETE ===\n');
