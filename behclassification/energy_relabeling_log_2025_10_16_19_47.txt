@@ -1,0 +1,19 @@
+ENERGY-BASED RELABELING LOG
+===========================
+Date: 16-Oct-2025 19:47:32
+
+PARAMETERS:
+Energy Metric: variance_based
+Threshold Method: manual
+Threshold Value: 1.0000
+
+RESULTS:
+Original Class 4 count: 629
+Original Class 7 count: 781
+New Class 4 count: 783
+New Class 7 count: 627
+Total relabeled: 262
+
+ENERGY STATISTICS:
+Class 4 - Mean: 9.25, Std: 12.65
+Class 7 - Mean: 1.17, Std: 2.35

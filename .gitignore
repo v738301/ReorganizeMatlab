@@ -1,0 +1,19 @@
+# MATLAB autosave files
+*.asv
+
+# macOS system files
+.DS_Store
+
+# Large data files (you may want to adjust based on your needs)
+*.mat
+
+# Figure files (optional - comment out if you want to track these)
+*.fig
+
+# Large image files (optional)
+*.png
+*.jpg
+
+# Temporary files
+*.tmp
+~$*
