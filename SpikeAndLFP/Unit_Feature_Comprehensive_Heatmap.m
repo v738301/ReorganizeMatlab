@@ -767,9 +767,20 @@ function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tr
     unit_linkage_tree = [];
     feature_linkage_tree = [];
 
+    % Minimum sample size for clustering
+    MIN_UNITS_FOR_CLUSTERING = 3;
+    MIN_FEATURES_FOR_CLUSTERING = 3;
+
     % --- UNIT SORTING (only if clustering units or both) ---
     if strcmp(config.cluster_dimension, 'units') || strcmp(config.cluster_dimension, 'both')
         fprintf('    Clustering/sorting units...\n');
+
+        % Check if we have enough units for clustering
+        if size(feature_matrix, 1) < MIN_UNITS_FOR_CLUSTERING
+            fprintf('    WARNING: Only %d units available, skipping clustering (minimum: %d)\n', ...
+                size(feature_matrix, 1), MIN_UNITS_FOR_CLUSTERING);
+            fprintf('      Using original order\n');
+        else
 
         switch config.sort_method
             case 'session_type'
@@ -782,47 +793,59 @@ function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tr
                 % Hierarchical clustering of units
                 % Remove units with too many NaNs
                 valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-                feature_matrix_clean = feature_matrix(valid_units, :);
 
-                % Replace remaining NaNs with column mean
-                for f = 1:size(feature_matrix_clean, 2)
-                    col = feature_matrix_clean(:, f);
-                    col(isnan(col)) = nanmean(col);
-                    feature_matrix_clean(:, f) = col;
+                if sum(valid_units) < MIN_UNITS_FOR_CLUSTERING
+                    fprintf('    WARNING: Only %d valid units (minimum: %d), using original order\n', ...
+                        sum(valid_units), MIN_UNITS_FOR_CLUSTERING);
+                else
+                    feature_matrix_clean = feature_matrix(valid_units, :);
+
+                    % Replace remaining NaNs with column mean
+                    for f = 1:size(feature_matrix_clean, 2)
+                        col = feature_matrix_clean(:, f);
+                        col(isnan(col)) = nanmean(col);
+                        feature_matrix_clean(:, f) = col;
+                    end
+
+                    % Compute distance and linkage
+                    distances = pdist(feature_matrix_clean, 'euclidean');
+                    unit_linkage_tree = linkage(distances, 'ward');
+
+                    % Get dendrogram order
+                    [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
+
+                    % Map back to original indices
+                    valid_idx = find(valid_units);
+                    unit_sort_idx = valid_idx(sort_idx_clean);
                 end
-
-                % Compute distance and linkage
-                distances = pdist(feature_matrix_clean, 'euclidean');
-                unit_linkage_tree = linkage(distances, 'ward');
-
-                % Get dendrogram order
-                [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
-
-                % Map back to original indices
-                valid_idx = find(valid_units);
-                unit_sort_idx = valid_idx(sort_idx_clean);
 
             case 'pca'
                 % Sort by first principal component
                 % Remove NaNs
                 valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-                feature_matrix_clean = feature_matrix(valid_units, :);
 
-                for f = 1:size(feature_matrix_clean, 2)
-                    col = feature_matrix_clean(:, f);
-                    col(isnan(col)) = nanmean(col);
-                    feature_matrix_clean(:, f) = col;
+                if sum(valid_units) < MIN_UNITS_FOR_CLUSTERING
+                    fprintf('    WARNING: Only %d valid units (minimum: %d), using original order\n', ...
+                        sum(valid_units), MIN_UNITS_FOR_CLUSTERING);
+                else
+                    feature_matrix_clean = feature_matrix(valid_units, :);
+
+                    for f = 1:size(feature_matrix_clean, 2)
+                        col = feature_matrix_clean(:, f);
+                        col(isnan(col)) = nanmean(col);
+                        feature_matrix_clean(:, f) = col;
+                    end
+
+                    % PCA
+                    [~, score, ~] = pca(feature_matrix_clean);
+
+                    % Sort by PC1
+                    [~, sort_idx_clean] = sort(score(:, 1));
+
+                    % Map back to original indices
+                    valid_idx = find(valid_units);
+                    unit_sort_idx = valid_idx(sort_idx_clean);
                 end
-
-                % PCA
-                [~, score, ~] = pca(feature_matrix_clean);
-
-                % Sort by PC1
-                [~, sort_idx_clean] = sort(score(:, 1));
-
-                % Map back to original indices
-                valid_idx = find(valid_units);
-                unit_sort_idx = valid_idx(sort_idx_clean);
 
             case 'feature'
                 % Sort by specific feature
@@ -841,36 +864,51 @@ function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tr
                 unit_sort_idx = [aversive_idx, reward_idx];
         end
         fprintf('      ✓ Units sorted\n');
+        end
     end
 
     % --- FEATURE SORTING (only if clustering features or both) ---
     if strcmp(config.cluster_dimension, 'features') || strcmp(config.cluster_dimension, 'both')
         fprintf('    Clustering features...\n');
 
-        % Hierarchical clustering of features
-        % Transpose the matrix (features as rows)
-        % Remove features with too many NaNs
-        valid_features = sum(~isnan(feature_matrix), 1) > size(feature_matrix, 1) * 0.5;
-        feature_matrix_transposed = feature_matrix(:, valid_features)';
+        % Check if we have enough features for clustering
+        if size(feature_matrix, 2) < MIN_FEATURES_FOR_CLUSTERING
+            fprintf('    WARNING: Only %d features available, skipping feature clustering (minimum: %d)\n', ...
+                size(feature_matrix, 2), MIN_FEATURES_FOR_CLUSTERING);
+            fprintf('      Using original order\n');
+        else
 
-        % Replace remaining NaNs with row mean
-        for u = 1:size(feature_matrix_transposed, 2)
-            col = feature_matrix_transposed(:, u);
-            col(isnan(col)) = nanmean(col);
-            feature_matrix_transposed(:, u) = col;
+            % Hierarchical clustering of features
+            % Transpose the matrix (features as rows)
+            % Remove features with too many NaNs
+            valid_features = sum(~isnan(feature_matrix), 1) > size(feature_matrix, 1) * 0.5;
+
+            if sum(valid_features) < MIN_FEATURES_FOR_CLUSTERING
+                fprintf('    WARNING: Only %d valid features (minimum: %d), using original order\n', ...
+                    sum(valid_features), MIN_FEATURES_FOR_CLUSTERING);
+            else
+                feature_matrix_transposed = feature_matrix(:, valid_features)';
+
+                % Replace remaining NaNs with row mean
+                for u = 1:size(feature_matrix_transposed, 2)
+                    col = feature_matrix_transposed(:, u);
+                    col(isnan(col)) = nanmean(col);
+                    feature_matrix_transposed(:, u) = col;
+                end
+
+                % Compute distance and linkage
+                distances_features = pdist(feature_matrix_transposed, 'euclidean');
+                feature_linkage_tree = linkage(distances_features, 'ward');
+
+                % Get dendrogram order
+                [~, ~, feature_sort_idx_clean] = dendrogram(feature_linkage_tree, 0);
+
+                % Map back to original indices
+                valid_feat_idx = find(valid_features);
+                feature_sort_idx = valid_feat_idx(feature_sort_idx_clean);
+                fprintf('      ✓ Features sorted\n');
+            end
         end
-
-        % Compute distance and linkage
-        distances_features = pdist(feature_matrix_transposed, 'euclidean');
-        feature_linkage_tree = linkage(distances_features, 'ward');
-
-        % Get dendrogram order
-        [~, ~, feature_sort_idx_clean] = dendrogram(feature_linkage_tree, 0);
-
-        % Map back to original indices
-        valid_feat_idx = find(valid_features);
-        feature_sort_idx = valid_feat_idx(feature_sort_idx_clean);
-        fprintf('      ✓ Features sorted\n');
     end
 end
 
