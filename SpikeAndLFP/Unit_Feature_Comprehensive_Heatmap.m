@@ -701,6 +701,191 @@ xlim([-2,2])
 ylim([-2,2])
 
 %% ========================================================================
+%  SIMPLIFIED 6-FEATURE CLUSTERING ANALYSIS
+%% ========================================================================
+
+fprintf('\n=== SIMPLIFIED 6-FEATURE CLUSTERING ===\n\n');
+
+% Define the 6 key features for simplified clustering
+simplified_feature_names = {
+    'Coh_1-3Hz',           % Coherence 1-3Hz
+    'Coh_5-7Hz',           % Coherence 5-7Hz
+    'Coh_8-10Hz',          % Coherence 8-10Hz
+    'PSTH_WP1_MeanZ',      % PSTH WP1 mean z-score
+    'PSTH_WP2_MeanZ',      % PSTH WP2 mean z-score
+    'PSTH_Aversive_MeanZ'  % PSTH Aversive mean z-score
+};
+
+% Extract these features from the full feature matrix
+simplified_matrix = [];
+simplified_names_found = {};
+simplified_indices = [];
+
+for i = 1:length(simplified_feature_names)
+    feat_idx = find(strcmp(feature_names, simplified_feature_names{i}));
+    if ~isempty(feat_idx)
+        simplified_matrix(:, end+1) = feature_matrix(:, feat_idx);
+        simplified_names_found{end+1} = simplified_feature_names{i};
+        simplified_indices(end+1) = feat_idx;
+    else
+        fprintf('  WARNING: Feature "%s" not found, skipping\n', simplified_feature_names{i});
+    end
+end
+
+fprintf('Found %d/%d features for simplified analysis\n', length(simplified_names_found), length(simplified_feature_names));
+
+if size(simplified_matrix, 2) < 3
+    fprintf('ERROR: Not enough features found for simplified clustering (need at least 3)\n');
+else
+    % Normalize the simplified feature matrix
+    simplified_matrix_norm = nan(size(simplified_matrix));
+    for f = 1:size(simplified_matrix, 2)
+        feature_col = simplified_matrix(:, f);
+        valid_data = feature_col(~isnan(feature_col));
+
+        if ~isempty(valid_data) && std(valid_data) > 0
+            simplified_matrix_norm(:, f) = (feature_col - mean(valid_data)) / std(valid_data);
+        else
+            simplified_matrix_norm(:, f) = feature_col;
+        end
+    end
+
+    % Determine how many plots to create (separate by session or combined)
+    if config.separate_by_session
+        n_simple_plots = 2;
+        simple_plot_names = {'Aversive', 'Reward'};
+    else
+        n_simple_plots = 1;
+        simple_plot_names = {'Combined'};
+    end
+
+    for plot_idx = 1:n_simple_plots
+
+        if config.separate_by_session
+            fprintf('\n  Creating simplified heatmap for %s sessions...\n', simple_plot_names{plot_idx});
+
+            % Select units for this session type
+            if strcmp(simple_plot_names{plot_idx}, 'Aversive')
+                sess_units = is_aversive;
+            else
+                sess_units = ~is_aversive;
+            end
+
+            simple_matrix_plot = simplified_matrix_norm(sess_units, :);
+            simple_is_aversive = is_aversive(sess_units);
+        else
+            simple_matrix_plot = simplified_matrix_norm;
+            simple_is_aversive = is_aversive;
+        end
+
+        % Perform hierarchical clustering on simplified matrix
+        valid_units = sum(~isnan(simple_matrix_plot), 2) > size(simple_matrix_plot, 2) * 0.5;
+
+        if sum(valid_units) >= 3
+            simple_matrix_clean = simple_matrix_plot(valid_units, :);
+
+            % Remove NaN columns
+            valid_features = sum(~isnan(simple_matrix_clean), 1) > size(simple_matrix_clean, 1) * 0.3;
+            simple_matrix_clean = simple_matrix_clean(:, valid_features);
+            simple_names_used = simplified_names_found(valid_features);
+
+            % Replace remaining NaNs with column mean
+            for f = 1:size(simple_matrix_clean, 2)
+                col = simple_matrix_clean(:, f);
+                if ~all(isnan(col))
+                    col(isnan(col)) = nanmean(col);
+                    simple_matrix_clean(:, f) = col;
+                end
+            end
+
+            % Compute distance and linkage
+            distances = pdist(simple_matrix_clean, 'euclidean');
+            simple_linkage_tree = linkage(distances, 'ward');
+
+            % Get dendrogram order
+            [~, ~, sort_idx_clean] = dendrogram(simple_linkage_tree, 0);
+
+            % Map back to original indices
+            valid_idx = find(valid_units);
+            simple_sort_idx = valid_idx(sort_idx_clean);
+
+            % Reorder matrix
+            simple_matrix_sorted = simple_matrix_plot(simple_sort_idx, valid_features);
+            simple_is_aversive_sorted = simple_is_aversive(simple_sort_idx);
+
+            % Create figure
+            fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
+                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
+
+            % Left: Dendrogram
+            subplot('Position', [0.05 0.15 0.10 0.75]);
+            dendrogram(simple_linkage_tree, 0, 'Orientation', 'left');
+            set(gca, 'YDir', 'reverse');
+            set(gca, 'XTickLabel', []);
+            ylabel('Units');
+            title('Unit Clustering');
+
+            % Center: Heatmap
+            subplot('Position', [0.17 0.15 0.65 0.75]);
+            imagesc(simple_matrix_sorted);
+            axis tight;
+            colormap(bluewhitered(256));
+            caxis([-3 3]);
+
+            % Colorbar
+            cb = colorbar;
+            cb.Position = [0.84 0.15 0.02 0.75];
+            ylabel(cb, 'Z-score', 'FontSize', 11);
+
+            % Labels
+            xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
+
+            % X-axis: Feature names
+            set(gca, 'XTick', 1:length(simple_names_used));
+            set(gca, 'XTickLabel', simple_names_used);
+            set(gca, 'XTickLabelRotation', 45);
+            set(gca, 'FontSize', 11);
+
+            % Y-axis: Unit indices
+            set(gca, 'YTick', []);
+
+            % Add session type color bar on LEFT
+            subplot('Position', [0.15 0.15 0.01 0.75]);
+            session_type_colors = zeros(length(simple_sort_idx), 1, 3);
+            for i = 1:length(simple_sort_idx)
+                if simple_is_aversive_sorted(i)
+                    session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
+                else
+                    session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
+                end
+            end
+            image(session_type_colors);
+            set(gca, 'XTick', [], 'YTick', []);
+            xlabel('Session', 'FontSize', 9, 'Rotation', 0);
+
+            % Add title
+            if config.separate_by_session
+                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
+                    simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
+            else
+                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
+                    size(simple_matrix_sorted, 1));
+            end
+            annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
+                'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+                'HorizontalAlignment', 'center');
+
+            fprintf('  ✓ Simplified heatmap created\n');
+        else
+            fprintf('  WARNING: Not enough valid units (%d) for simplified clustering\n', sum(valid_units));
+        end
+    end
+
+    fprintf('\n✓ Simplified clustering complete\n\n');
+end
+
+%% ========================================================================
 %  SECTION 8: SAVE RESULTS
 %% ========================================================================
 
