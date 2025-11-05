@@ -949,19 +949,40 @@ else
             end
 
             % --- CREATE SESSION ID COMPOSITION FIGURE ---
-            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1400 800], ...
+            % Create figure first to avoid overlap issues
+            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1600 800], ...
                                     'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
 
-            % Left subplot: Heatmap showing session contribution to each cluster
-            subplot(1, 2, 1);
-            imagesc(session_cluster_matrix');  % Transpose so clusters are on X, sessions on Y
-            colormap(hot);
-            colorbar;
+            % --- LEFT: Colored Dendrogram ---
+            subplot('Position', [0.05 0.12 0.18 0.75]);
+
+            % Create dendrogram with cluster coloring
+            dendrogram_handles = dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', 'ColorThreshold', cluster_threshold);
+            set(gca, 'YDir', 'reverse');
+            set(gca, 'XTickLabel', []);
+            ylabel('Units', 'FontSize', 11, 'FontWeight', 'bold');
+            title('Dendrogram', 'FontSize', 12, 'FontWeight', 'bold');
+            set(gca, 'FontSize', 10);
+
+            % Add cluster threshold line
+            hold on;
+            xlims = xlim;
+            plot([cluster_threshold, cluster_threshold], ylim, 'r--', 'LineWidth', 2);
+            hold off;
+
+            % --- CENTER: Heatmap showing session contribution to each cluster ---
+            subplot('Position', [0.28 0.12 0.35 0.75]);
+            imagesc(session_cluster_matrix');  % Transpose so clusters are on Y, sessions on X
+
+            % Use a better colormap for counts
+            colormap(gca, hot);
+            cb = colorbar('Position', [0.64 0.12 0.015 0.75]);
+            ylabel(cb, 'Unit Count', 'FontSize', 10);
 
             % Labels
-            xlabel('Session ID', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
-            title('Units per Session per Cluster', 'FontSize', 13, 'FontWeight', 'bold');
+            xlabel('Session ID', 'FontSize', 11, 'FontWeight', 'bold');
+            ylabel('Cluster ID', 'FontSize', 11, 'FontWeight', 'bold');
+            title('Units per Session per Cluster', 'FontSize', 12, 'FontWeight', 'bold');
 
             % X-axis: Session IDs
             set(gca, 'XTick', 1:n_sessions);
@@ -980,14 +1001,20 @@ else
                 for c = 1:n_clusters
                     count = session_cluster_matrix(s, c);
                     if count > 0
+                        % Use white or black text depending on background intensity
+                        if count > max(session_cluster_matrix(:)) * 0.5
+                            text_color = 'white';
+                        else
+                            text_color = 'black';
+                        end
                         text(s, c, num2str(count), 'HorizontalAlignment', 'center', ...
-                            'Color', 'white', 'FontSize', 9, 'FontWeight', 'bold');
+                            'Color', text_color, 'FontSize', 9, 'FontWeight', 'bold');
                     end
                 end
             end
 
-            % Right subplot: Bar chart showing total units per session across all clusters
-            subplot(1, 2, 2);
+            % --- RIGHT: Bar chart showing total units per session ---
+            subplot('Position', [0.70 0.12 0.25 0.75]);
             units_per_session = sum(session_cluster_matrix, 2);
 
             % Color bars by session type (if available)
@@ -1006,15 +1033,22 @@ else
             bar_handle = bar(1:n_sessions, units_per_session, 'FaceColor', 'flat');
             bar_handle.CData = bar_colors;
 
-            xlabel('Session ID', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Total Number of Units', 'FontSize', 12, 'FontWeight', 'bold');
-            title('Units per Session (All Clusters)', 'FontSize', 13, 'FontWeight', 'bold');
+            xlabel('Session ID', 'FontSize', 11, 'FontWeight', 'bold');
+            ylabel('Total Units', 'FontSize', 11, 'FontWeight', 'bold');
+            title('Units per Session', 'FontSize', 12, 'FontWeight', 'bold');
 
             set(gca, 'XTick', 1:n_sessions);
             set(gca, 'XTickLabel', unique_sessions);
             set(gca, 'XTickLabelRotation', 45);
             set(gca, 'FontSize', 10);
             grid on;
+
+            % Add legend for session types
+            hold on;
+            h_aversive = plot(nan, nan, 's', 'MarkerSize', 10, 'MarkerFaceColor', [0.8 0.2 0.2], 'MarkerEdgeColor', 'none');
+            h_reward = plot(nan, nan, 's', 'MarkerSize', 10, 'MarkerFaceColor', [0.2 0.2 0.8], 'MarkerEdgeColor', 'none');
+            legend([h_aversive, h_reward], {'Aversive', 'Reward'}, 'Location', 'best', 'FontSize', 9);
+            hold off;
 
             % Add overall title
             if config.separate_by_session
