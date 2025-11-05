@@ -800,23 +800,35 @@ function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tr
                 else
                     feature_matrix_clean = feature_matrix(valid_units, :);
 
-                    % Replace remaining NaNs with column mean
-                    for f = 1:size(feature_matrix_clean, 2)
-                        col = feature_matrix_clean(:, f);
-                        col(isnan(col)) = nanmean(col);
-                        feature_matrix_clean(:, f) = col;
+                    % Remove features (columns) that are entirely or mostly NaN
+                    % This is critical for separate session analysis where session-specific features may be all NaN
+                    valid_features = sum(~isnan(feature_matrix_clean), 1) > size(feature_matrix_clean, 1) * 0.3;
+
+                    if sum(valid_features) < 2
+                        fprintf('    WARNING: Only %d valid features after removing NaN columns, using original order\n', sum(valid_features));
+                    else
+                        feature_matrix_clean = feature_matrix_clean(:, valid_features);
+
+                        % Replace remaining NaNs with column mean
+                        for f = 1:size(feature_matrix_clean, 2)
+                            col = feature_matrix_clean(:, f);
+                            if ~all(isnan(col))  % Extra safety check
+                                col(isnan(col)) = nanmean(col);
+                                feature_matrix_clean(:, f) = col;
+                            end
+                        end
+
+                        % Compute distance and linkage
+                        distances = pdist(feature_matrix_clean, 'euclidean');
+                        unit_linkage_tree = linkage(distances, 'ward');
+
+                        % Get dendrogram order
+                        [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
+
+                        % Map back to original indices
+                        valid_idx = find(valid_units);
+                        unit_sort_idx = valid_idx(sort_idx_clean);
                     end
-
-                    % Compute distance and linkage
-                    distances = pdist(feature_matrix_clean, 'euclidean');
-                    unit_linkage_tree = linkage(distances, 'ward');
-
-                    % Get dendrogram order
-                    [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
-
-                    % Map back to original indices
-                    valid_idx = find(valid_units);
-                    unit_sort_idx = valid_idx(sort_idx_clean);
                 end
 
             case 'pca'
@@ -830,21 +842,33 @@ function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tr
                 else
                     feature_matrix_clean = feature_matrix(valid_units, :);
 
-                    for f = 1:size(feature_matrix_clean, 2)
-                        col = feature_matrix_clean(:, f);
-                        col(isnan(col)) = nanmean(col);
-                        feature_matrix_clean(:, f) = col;
+                    % Remove features (columns) that are entirely or mostly NaN
+                    valid_features = sum(~isnan(feature_matrix_clean), 1) > size(feature_matrix_clean, 1) * 0.3;
+
+                    if sum(valid_features) < 2
+                        fprintf('    WARNING: Only %d valid features after removing NaN columns, using original order\n', sum(valid_features));
+                    else
+                        feature_matrix_clean = feature_matrix_clean(:, valid_features);
+
+                        % Replace remaining NaNs with column mean
+                        for f = 1:size(feature_matrix_clean, 2)
+                            col = feature_matrix_clean(:, f);
+                            if ~all(isnan(col))  % Extra safety check
+                                col(isnan(col)) = nanmean(col);
+                                feature_matrix_clean(:, f) = col;
+                            end
+                        end
+
+                        % PCA
+                        [~, score, ~] = pca(feature_matrix_clean);
+
+                        % Sort by PC1
+                        [~, sort_idx_clean] = sort(score(:, 1));
+
+                        % Map back to original indices
+                        valid_idx = find(valid_units);
+                        unit_sort_idx = valid_idx(sort_idx_clean);
                     end
-
-                    % PCA
-                    [~, score, ~] = pca(feature_matrix_clean);
-
-                    % Sort by PC1
-                    [~, sort_idx_clean] = sort(score(:, 1));
-
-                    % Map back to original indices
-                    valid_idx = find(valid_units);
-                    unit_sort_idx = valid_idx(sort_idx_clean);
                 end
 
             case 'feature'
