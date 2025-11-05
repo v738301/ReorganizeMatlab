@@ -31,14 +31,15 @@ fprintf('=== COMPREHENSIVE UNIT FEATURE HEATMAP ===\n\n');
 
 % Visualization configuration
 config = struct();
+config.cluster_dimension = 'units';  % Options: 'units', 'features', 'both'
 config.sort_method = 'hierarchical';  % Options: 'session_type', 'hierarchical', 'pca', 'feature'
-config.sort_method = 'feature';  % Options: 'session_type', 'hierarchical', 'pca', 'feature'
 config.feature_to_sort = [];  % Used if sort_method = 'feature'
 config.show_dendrogram = true;  % Show hierarchical clustering dendrogram
 config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
 
 fprintf('Configuration:\n');
+fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
 fprintf('  Sort method: %s\n', config.sort_method);
 fprintf('  Normalize features: %d\n', config.normalize_features);
 fprintf('  Colormap: %s\n\n', config.colormap_name);
@@ -253,92 +254,127 @@ else
 end
 
 %% ========================================================================
-%  SECTION 5: DETERMINE UNIT SORTING ORDER
+%  SECTION 5: DETERMINE SORTING ORDER (UNITS AND/OR FEATURES)
 %% ========================================================================
 
-fprintf('Determining unit sorting order...\n');
-fprintf('  Method: %s\n', config.sort_method);
+fprintf('Determining sorting order...\n');
+fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
+fprintf('  Sort method: %s\n', config.sort_method);
 
 % Get session types for all units
 session_types = {coherence_features.session_type};
 is_aversive = contains(session_types, 'Aversive');
 
-switch config.sort_method
-    case 'session_type'
-        % Simple sort: Aversive first, then Reward
-        aversive_idx = find(is_aversive);
-        reward_idx = find(~is_aversive);
-        sort_idx = [aversive_idx, reward_idx];
-        linkage_tree = [];
+% Initialize
+unit_sort_idx = 1:size(feature_matrix, 1);
+feature_sort_idx = 1:size(feature_matrix, 2);
+unit_linkage_tree = [];
+feature_linkage_tree = [];
 
-    case 'hierarchical'
-        % Hierarchical clustering
-        % Remove units with too many NaNs
-        valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-        feature_matrix_clean = feature_matrix(valid_units, :);
+% --- UNIT SORTING (only if clustering units or both) ---
+if strcmp(config.cluster_dimension, 'units') || strcmp(config.cluster_dimension, 'both')
+    fprintf('  Clustering/sorting units...\n');
 
-        % Replace remaining NaNs with column mean
-        for f = 1:size(feature_matrix_clean, 2)
-            col = feature_matrix_clean(:, f);
-            col(isnan(col)) = nanmean(col);
-            feature_matrix_clean(:, f) = col;
-        end
+    switch config.sort_method
+        case 'session_type'
+            % Simple sort: Aversive first, then Reward
+            aversive_idx = find(is_aversive);
+            reward_idx = find(~is_aversive);
+            unit_sort_idx = [aversive_idx, reward_idx];
 
-        % Compute distance and linkage
-        distances = pdist(feature_matrix_clean, 'euclidean');
-        linkage_tree = linkage(distances, 'ward');
+        case 'hierarchical'
+            % Hierarchical clustering of units
+            % Remove units with too many NaNs
+            valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
+            feature_matrix_clean = feature_matrix(valid_units, :);
 
-        % Get dendrogram order
-        [~, ~, sort_idx_clean] = dendrogram(linkage_tree, 0);
+            % Replace remaining NaNs with column mean
+            for f = 1:size(feature_matrix_clean, 2)
+                col = feature_matrix_clean(:, f);
+                col(isnan(col)) = nanmean(col);
+                feature_matrix_clean(:, f) = col;
+            end
 
-        % Map back to original indices
-        valid_idx = find(valid_units);
-        sort_idx = valid_idx(sort_idx_clean);
+            % Compute distance and linkage
+            distances = pdist(feature_matrix_clean, 'euclidean');
+            unit_linkage_tree = linkage(distances, 'ward');
 
-    case 'pca'
-        % Sort by first principal component
-        % Remove NaNs
-        valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-        feature_matrix_clean = feature_matrix(valid_units, :);
+            % Get dendrogram order
+            [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
 
-        for f = 1:size(feature_matrix_clean, 2)
-            col = feature_matrix_clean(:, f);
-            col(isnan(col)) = nanmean(col);
-            feature_matrix_clean(:, f) = col;
-        end
+            % Map back to original indices
+            valid_idx = find(valid_units);
+            unit_sort_idx = valid_idx(sort_idx_clean);
 
-        % PCA
-        [coeff, score, ~] = pca(feature_matrix_clean);
+        case 'pca'
+            % Sort by first principal component
+            % Remove NaNs
+            valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
+            feature_matrix_clean = feature_matrix(valid_units, :);
 
-        % Sort by PC1
-        [~, sort_idx_clean] = sort(score(:, 1));
+            for f = 1:size(feature_matrix_clean, 2)
+                col = feature_matrix_clean(:, f);
+                col(isnan(col)) = nanmean(col);
+                feature_matrix_clean(:, f) = col;
+            end
 
-        % Map back to original indices
-        valid_idx = find(valid_units);
-        sort_idx = valid_idx(sort_idx_clean);
-        linkage_tree = [];
+            % PCA
+            [coeff, score, ~] = pca(feature_matrix_clean);
 
-    case 'feature'
-        % Sort by specific feature
-        feature_idx = find(strcmp(feature_names, config.feature_to_sort));
-        if isempty(feature_idx)
-            fprintf('  WARNING: Feature %s not found, using session_type instead\n', config.feature_to_sort);
-%             aversive_idx = find(is_aversive);
-%             reward_idx = find(~is_aversive);
-%             sort_idx = [aversive_idx, reward_idx];
-%             [~, sort_idx] = sortrows([is_aversive',feature_matrix], [0,85,83,2,3]+1 ,'descend', 'MissingPlacement', 'last');
-            [~, sort_idx] = sortrows([is_aversive',feature_matrix], [0,3]+1 ,'descend', 'MissingPlacement', 'last');
-        else
-            [~, sort_idx] = sort(feature_matrix(:, feature_idx), 'descend', 'MissingPlacement', 'last');
-        end
-        linkage_tree = [];
+            % Sort by PC1
+            [~, sort_idx_clean] = sort(score(:, 1));
 
-    otherwise
-        % Default: session type
-        aversive_idx = find(is_aversive);
-        reward_idx = find(~is_aversive);
-        sort_idx = [aversive_idx, reward_idx];
-        linkage_tree = [];
+            % Map back to original indices
+            valid_idx = find(valid_units);
+            unit_sort_idx = valid_idx(sort_idx_clean);
+
+        case 'feature'
+            % Sort by specific feature
+            feature_idx = find(strcmp(feature_names, config.feature_to_sort));
+            if isempty(feature_idx)
+                fprintf('    WARNING: Feature %s not found, using default sort\n', config.feature_to_sort);
+                [~, unit_sort_idx] = sortrows([is_aversive',feature_matrix], [0,3]+1 ,'descend', 'MissingPlacement', 'last');
+            else
+                [~, unit_sort_idx] = sort(feature_matrix(:, feature_idx), 'descend', 'MissingPlacement', 'last');
+            end
+
+        otherwise
+            % Default: session type
+            aversive_idx = find(is_aversive);
+            reward_idx = find(~is_aversive);
+            unit_sort_idx = [aversive_idx, reward_idx];
+    end
+    fprintf('    ✓ Units sorted\n');
+end
+
+% --- FEATURE SORTING (only if clustering features or both) ---
+if strcmp(config.cluster_dimension, 'features') || strcmp(config.cluster_dimension, 'both')
+    fprintf('  Clustering features...\n');
+
+    % Hierarchical clustering of features
+    % Transpose the matrix (features as rows)
+    % Remove features with too many NaNs
+    valid_features = sum(~isnan(feature_matrix), 1) > size(feature_matrix, 1) * 0.5;
+    feature_matrix_transposed = feature_matrix(:, valid_features)';
+
+    % Replace remaining NaNs with row mean
+    for u = 1:size(feature_matrix_transposed, 2)
+        col = feature_matrix_transposed(:, u);
+        col(isnan(col)) = nanmean(col);
+        feature_matrix_transposed(:, u) = col;
+    end
+
+    % Compute distance and linkage
+    distances_features = pdist(feature_matrix_transposed, 'euclidean');
+    feature_linkage_tree = linkage(distances_features, 'ward');
+
+    % Get dendrogram order
+    [~, ~, feature_sort_idx_clean] = dendrogram(feature_linkage_tree, 0);
+
+    % Map back to original indices
+    valid_feat_idx = find(valid_features);
+    feature_sort_idx = valid_feat_idx(feature_sort_idx_clean);
+    fprintf('    ✓ Features sorted\n');
 end
 
 fprintf('✓ Sorting order determined\n\n');
@@ -349,33 +385,82 @@ fprintf('✓ Sorting order determined\n\n');
 
 fprintf('Creating comprehensive heatmap...\n');
 
-% Reorder matrix
-feature_matrix_sorted = feature_matrix(sort_idx, :);
-session_types_sorted = session_types(sort_idx);
-is_aversive_sorted = is_aversive(sort_idx);
+% Reorder matrix based on clustering dimension
+feature_matrix_sorted = feature_matrix(unit_sort_idx, feature_sort_idx);
+session_types_sorted = session_types(unit_sort_idx);
+is_aversive_sorted = is_aversive(unit_sort_idx);
+feature_names_sorted = feature_names(feature_sort_idx);
+feature_categories_sorted = feature_categories(feature_sort_idx);
 
 % Create main figure
 fig = figure('Position', [50 50 2000 1200], 'Name', 'Comprehensive Unit Feature Heatmap');
 
-% Create subplot layout: dendrogram (optional) + heatmap + colorbar
-if config.show_dendrogram && ~isempty(linkage_tree)
-    % With dendrogram
-    subplot('Position', [0.05 0.15 0.10 0.75]);  % Dendrogram on left
-    dendrogram(linkage_tree, 0, 'Orientation', 'left');
+% Determine subplot positions based on clustering dimension
+if strcmp(config.cluster_dimension, 'both')
+    % Both dendrograms
+    has_unit_dendrogram = config.show_dendrogram && ~isempty(unit_linkage_tree);
+    has_feature_dendrogram = config.show_dendrogram && ~isempty(feature_linkage_tree);
+
+    heatmap_left = 0.17;
+    heatmap_bottom = 0.15;
+    heatmap_width = 0.65;
+    heatmap_height = 0.65;
+
+elseif strcmp(config.cluster_dimension, 'units')
+    % Only unit dendrogram on left
+    has_unit_dendrogram = config.show_dendrogram && ~isempty(unit_linkage_tree);
+    has_feature_dendrogram = false;
+
+    if has_unit_dendrogram
+        heatmap_left = 0.17;
+    else
+        heatmap_left = 0.08;
+    end
+    heatmap_bottom = 0.15;
+    heatmap_width = 0.70;
+    heatmap_height = 0.75;
+
+else  % 'features'
+    % Only feature dendrogram on top
+    has_unit_dendrogram = false;
+    has_feature_dendrogram = config.show_dendrogram && ~isempty(feature_linkage_tree);
+
+    heatmap_left = 0.08;
+    if has_feature_dendrogram
+        heatmap_bottom = 0.15;
+        heatmap_height = 0.65;
+    else
+        heatmap_bottom = 0.15;
+        heatmap_height = 0.75;
+    end
+    heatmap_width = 0.78;
+end
+
+% --- Draw Unit Dendrogram (if applicable) ---
+if has_unit_dendrogram
+    subplot('Position', [0.05 heatmap_bottom 0.10 heatmap_height]);
+    dendrogram(unit_linkage_tree, 0, 'Orientation', 'left');
     set(gca, 'YDir', 'reverse');
     set(gca, 'XTickLabel', []);
     ylabel('Units');
-    title('Clustering');
-
-    % Heatmap
-    subplot('Position', [0.17 0.15 0.70 0.75]);
-else
-    % No dendrogram - full width heatmap
-    subplot('Position', [0.08 0.15 0.80 0.75]);
+    title('Unit Clustering');
 end
 
-% Plot heatmap
-imagesc(feature_matrix_sorted');
+% --- Draw Feature Dendrogram (if applicable) ---
+if has_feature_dendrogram
+    subplot('Position', [heatmap_left 0.82 heatmap_width 0.10]);
+    dendrogram(feature_linkage_tree, 0, 'Orientation', 'top');
+    set(gca, 'XDir', 'normal');
+    set(gca, 'YTickLabel', []);
+    xlabel('Features');
+    title('Feature Clustering');
+end
+
+% --- Draw Main Heatmap ---
+subplot('Position', [heatmap_left heatmap_bottom heatmap_width heatmap_height]);
+
+% Plot heatmap (units on Y-axis, features on X-axis)
+imagesc(feature_matrix_sorted);
 axis tight;
 
 % Set colormap
@@ -396,7 +481,7 @@ end
 
 % Add colorbar
 cb = colorbar;
-cb.Position = [0.90 0.15 0.02 0.75];
+cb.Position = [0.90 heatmap_bottom 0.02 heatmap_height];
 if config.normalize_features
     ylabel(cb, 'Z-score', 'FontSize', 11);
 else
@@ -404,54 +489,71 @@ else
 end
 
 % Labels
-xlabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
-ylabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
 
-% Y-axis: Feature names
-set(gca, 'YTick', 1:length(feature_names));
-set(gca, 'YTickLabel', feature_names);
-set(gca, 'FontSize', 12);
+% X-axis: Feature names (rotated for readability)
+set(gca, 'XTick', 1:length(feature_names_sorted));
+set(gca, 'XTickLabel', feature_names_sorted);
+set(gca, 'XTickLabelRotation', 90);
+set(gca, 'FontSize', 8);
 
-% X-axis: Show session type boundaries
-set(gca, 'XTick', []);
+% Y-axis: Unit indices
+set(gca, 'YTick', []);
 
-% Add session type color bar at top
-subplot('Position', [0.17 0.91 0.70 0.02]);
-session_type_colors = zeros(1, length(sort_idx), 3);
-for i = 1:length(sort_idx)
+% --- Add session type color bar on LEFT (for units on Y-axis) ---
+if has_unit_dendrogram
+    session_bar_left = 0.15;
+else
+    session_bar_left = 0.06;
+end
+subplot('Position', [session_bar_left heatmap_bottom 0.01 heatmap_height]);
+session_type_colors = zeros(length(unit_sort_idx), 1, 3);
+for i = 1:length(unit_sort_idx)
     if is_aversive_sorted(i)
-        session_type_colors(1, i, :) = [0.8 0.2 0.2];  % Red for aversive
+        session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
     else
-        session_type_colors(1, i, :) = [0.2 0.2 0.8];  % Blue for reward
+        session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
     end
 end
 image(session_type_colors);
 set(gca, 'XTick', [], 'YTick', []);
-ylabel('Session', 'FontSize', 9, 'Rotation', 0, 'HorizontalAlignment', 'right');
+xlabel('Session', 'FontSize', 9, 'Rotation', 0);
 
-% Add feature category color bar on right
-subplot('Position', [0.88 0.15 0.01 0.75]);
+% --- Add feature category color bar (position depends on dendrogram) ---
+if has_feature_dendrogram
+    category_bar_bottom = 0.80;
+else
+    category_bar_bottom = 0.91;
+end
+subplot('Position', [heatmap_left category_bar_bottom heatmap_width 0.01]);
 unique_categories = unique(feature_categories, 'stable');
 category_colors = lines(length(unique_categories));
-feature_category_img = zeros(length(feature_names), 1, 3);
+feature_category_img = zeros(1, length(feature_names_sorted), 3);
 
-for i = 1:length(feature_names)
-    cat_idx = find(strcmp(unique_categories, feature_categories{i}));
-    feature_category_img(i, 1, :) = category_colors(cat_idx, :);
+for i = 1:length(feature_names_sorted)
+    cat_idx = find(strcmp(unique_categories, feature_categories_sorted{i}));
+    feature_category_img(1, i, :) = category_colors(cat_idx, :);
 end
 
 image(feature_category_img);
 set(gca, 'XTick', [], 'YTick', []);
-xlabel('Category', 'FontSize', 12, 'Rotation', 0);
+ylabel('Category', 'FontSize', 9, 'Rotation', 0, 'HorizontalAlignment', 'right');
 
-% Add title
-annotation('textbox', [0.17 0.94 0.70 0.05], 'String', ...
-    sprintf('Comprehensive Unit Features (%d units × %d features) | Sort: %s', ...
-    size(feature_matrix_sorted, 1), size(feature_matrix_sorted, 2), config.sort_method), ...
+% --- Add title ---
+if has_feature_dendrogram
+    title_bottom = 0.94;
+else
+    title_bottom = 0.94;
+end
+annotation('textbox', [heatmap_left title_bottom heatmap_width 0.05], 'String', ...
+    sprintf('Comprehensive Unit Features (%d units × %d features) | Cluster: %s | Sort: %s', ...
+    size(feature_matrix_sorted, 1), size(feature_matrix_sorted, 2), ...
+    config.cluster_dimension, config.sort_method), ...
     'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'center');
 
-% Add legend for categories
+% --- Add legend for categories ---
 legend_str = sprintf('Categories: ');
 for i = 1:length(unique_categories)
     legend_str = [legend_str, sprintf('%s | ', unique_categories{i})];
