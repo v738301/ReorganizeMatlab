@@ -692,13 +692,6 @@ end  % End of for loop over plots (separate sessions or combined)
 
 fprintf('✓ Heatmap(s) created\n\n');
 
-%% extra figure;
-figure; 
-scatter(feature_matrix(is_aversive,2),feature_matrix(is_aversive,3),12,feature_matrix(is_aversive,83),'fill')
-colormap turbo
-clim([-2,2])
-xlim([-2,2])
-ylim([-2,2])
 
 %% ========================================================================
 %  SIMPLIFIED 6-FEATURE CLUSTERING ANALYSIS
@@ -708,7 +701,6 @@ fprintf('\n=== SIMPLIFIED 6-FEATURE CLUSTERING ===\n\n');
 
 % Define the 6 key features for simplified clustering
 simplified_feature_names = {
-    'Coh_1-3Hz',           % Coherence 1-3Hz
     'Coh_5-7Hz',           % Coherence 5-7Hz
     'Coh_8-10Hz',          % Coherence 8-10Hz
     'PSTH_WP1_MeanZ',      % PSTH WP1 mean z-score
@@ -866,10 +858,10 @@ else
 
             % Add title
             if config.separate_by_session
-                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
+                title_str = sprintf('Simplified 5-Feature Clustering - %s Sessions (%d units)', ...
                     simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
             else
-                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
+                title_str = sprintf('Simplified 5-Feature Clustering (%d units)', ...
                     size(simple_matrix_sorted, 1));
             end
             annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
