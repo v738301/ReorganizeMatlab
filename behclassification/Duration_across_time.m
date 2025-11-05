@@ -1,12 +1,14 @@
 %% ========================================================================
-%  COUPLING STRENGTH ANALYSIS: Period × Behavior × SessionType
+%  BEHAVIORAL PATCH DURATION ANALYSIS: Period × Behavior × SessionType
+%  Analyzes duration/length of consecutive behavioral bouts
 %  MODIFIED: Uses post-hoc pairwise comparisons with FDR correction
 %  ========================================================================
 %
-%  Analysis: Coupling ~ Period × Behavior × SessionType
+%  Analysis: Duration ~ Period × Behavior × SessionType
 %  SessionType: Aversive vs Reward
 %  Periods: P1-P4 (matched across both session types)
-%  Method: Individual coupling data points aggregated by session
+%  Method: Extract all behavioral patches and measure their duration
+%  Duration unit: Seconds (prediction frame rate = 1Hz, 1 window = 1 second)
 %
 %% ========================================================================
 
@@ -17,7 +19,7 @@ clear all
 %  SECTION 1: CONFIGURATION
 %  ========================================================================
 
-fprintf('=== COUPLING STRENGTH ANALYSIS: AVERSIVE vs REWARD ===\n');
+fprintf('=== BEHAVIORAL PATCH DURATION ANALYSIS: AVERSIVE vs REWARD ===\n');
 fprintf('Period × Behavior × SessionType\n\n');
 
 config = struct();
@@ -25,6 +27,7 @@ config.behavior_names = {'Reward', 'Walking', 'Rearing', 'Scanning/Air-Sniff', .
                          'Ground-Sniff', 'Grooming', 'Standing/Immobility'};
 config.n_behaviors = 7;
 config.confidence_threshold = 0.3;
+config.prediction_framerate = 1;  % 1Hz, so 1 window = 1 second
 
 %% ========================================================================
 %  SECTION 2: LOAD DATA
@@ -57,26 +60,26 @@ catch ME
 end
 
 %% ========================================================================
-%  SECTION 3: EXTRACT AVERSIVE DATA (P1-P4 only)
+%  SECTION 3: EXTRACT AVERSIVE PATCH DURATIONS (P1-P4 only)
 %  ========================================================================
 
-fprintf('Extracting aversive session data (P1-P4)...\n');
+fprintf('Extracting aversive patch durations (P1-P4)...\n');
 
 % Initialize storage
 aversive_data = struct();
 aversive_data.session_id = [];
 aversive_data.period = [];
 aversive_data.behavior = [];
-aversive_data.coupling = [];
+aversive_data.duration = [];  % in seconds
 
 n_valid_aversive = 0;
+total_patches_aversive = 0;
 
 for sess_idx = 1:length(sessions_aversive)
     session = sessions_aversive{sess_idx};
 
     % Check required fields
     if ~isfield(session, 'all_aversive_time') || ...
-       ~isfield(session, 'coupling_results_multiband') || ...
        ~isfield(session, 'NeuralTime') || ...
        ~isfield(session, 'TriggerMid') || ...
        sess_idx > length(prediction_sessions_aversive)
@@ -90,27 +93,16 @@ for sess_idx = 1:length(sessions_aversive)
 
     n_valid_aversive = n_valid_aversive + 1;
 
-    % Extract coupling data
-    coupling = session.coupling_results_multiband.band_results{1}.MI_values;
-    coupling_time = session.coupling_results_multiband.band_results{1}.window_times;
-
-    % Extract prediction data
+    neural_time = session.NeuralTime;
     prediction_scores = prediction_sessions_aversive(sess_idx).prediction_scores;
     prediction_ind = 1:20:length(session.TriggerMid);
     prediction_ind = prediction_ind + 10;
     prediction_time = session.TriggerMid(prediction_ind);
 
-    % Interpolate coupling to prediction times
-    coupling_intp = interp1(coupling_time, coupling, prediction_time, 'nearest');
-
-    % Define period boundaries (P1-P4 only, matching reward structure)
+    % Define period boundaries (P1-P4 only)
     period_boundaries = [session.TriggerMid(1), ...
                          aversive_times(1:3)' + session.TriggerMid(1), ...
                          aversive_times(4) + session.TriggerMid(1)];
-
-    % Calculate baseline for normalization (Period 1)
-    baselineMean = nan(1, config.n_behaviors);
-    baselinesStd = nan(1, config.n_behaviors);
 
     % Process each period
     for period = 1:4
@@ -124,69 +116,71 @@ for sess_idx = 1:length(sessions_aversive)
             continue;
         end
 
-        prediction_index = find(prediction_idx);
+        % Get predictions for this period
+        predictions_in_period = prediction_scores(prediction_idx, :);
 
-        % Collect all coupling values and behaviors in this period
-        allcoupling_val = [];
-        alldominant_beh = [];
+        % Find dominant behavior for each window
+        [max_confidence, dominant_beh] = max(predictions_in_period, [], 2);
 
-        for pred_idx = 1:length(prediction_index)
-            [max_conf, dominant_beh] = max(prediction_scores(prediction_index(pred_idx), :));
-            if max_conf > config.confidence_threshold
-                coupling_val = coupling_intp(prediction_index(pred_idx));
-                allcoupling_val = [allcoupling_val, coupling_val];
-                alldominant_beh = [alldominant_beh, dominant_beh];
-            end
+        % Filter by confidence threshold
+        valid_mask = max_confidence > config.confidence_threshold;
+        valid_dominant = dominant_beh(valid_mask);
+
+        if length(valid_dominant) < 2
+            continue;
         end
 
-        % Process each behavior
-        for behID = 1:config.n_behaviors
-            % Calculate baseline from Period 1
-            if period == 1
-                baselineMean(behID) = nanmean(allcoupling_val(alldominant_beh == behID));
-                baselinesStd(behID) = nanstd(allcoupling_val(alldominant_beh == behID));
-            end
+        % Find consecutive patches (where behavior doesn't change)
+        % Add sentinel values to detect changes at boundaries
+        behavior_changes = [1; find(diff(valid_dominant) ~= 0) + 1; length(valid_dominant) + 1];
 
-            % Normalize coupling values
-            behavior_coupling = allcoupling_val(alldominant_beh == behID);
-            normed_beh_coupling = (behavior_coupling - baselineMean(behID)) ./ baselinesStd(behID);
+        % Extract each patch
+        for patch_idx = 1:(length(behavior_changes) - 1)
+            patch_start = behavior_changes(patch_idx);
+            patch_end = behavior_changes(patch_idx + 1) - 1;
 
-            % Store individual data points
-            n_points = length(normed_beh_coupling);
-            if n_points > 0
-                aversive_data.session_id = [aversive_data.session_id; repmat(n_valid_aversive, n_points, 1)];
-                aversive_data.period = [aversive_data.period; repmat(period, n_points, 1)];
-                aversive_data.behavior = [aversive_data.behavior; repmat(behID, n_points, 1)];
-                aversive_data.coupling = [aversive_data.coupling; normed_beh_coupling(:)];
-            end
+            patch_behavior = valid_dominant(patch_start);
+            patch_duration_windows = patch_end - patch_start + 1;
+
+            % Convert to seconds (1 window = 1 second at 1Hz)
+            patch_duration_seconds = patch_duration_windows * config.prediction_framerate;
+
+            % Store patch
+            aversive_data.session_id(end+1) = n_valid_aversive;
+            aversive_data.period(end+1) = period;
+            aversive_data.behavior(end+1) = patch_behavior;
+            aversive_data.duration(end+1) = patch_duration_seconds;
+
+            total_patches_aversive = total_patches_aversive + 1;
         end
     end
 end
 
 fprintf('✓ Processed %d aversive sessions\n', n_valid_aversive);
-fprintf('  Data points: %d\n\n', length(aversive_data.session_id));
+fprintf('  Total patches extracted: %d\n', total_patches_aversive);
+fprintf('  Mean patches per session: %.1f\n\n', total_patches_aversive / n_valid_aversive);
 
 %% ========================================================================
-%  SECTION 4: EXTRACT REWARD DATA (P1-P4)
+%  SECTION 4: EXTRACT REWARD PATCH DURATIONS (P1-P4)
 %  ========================================================================
 
-fprintf('Extracting reward session data (P1-P4)...\n');
+fprintf('Extracting reward patch durations (P1-P4)...\n');
 
 % Initialize storage
 reward_data = struct();
 reward_data.session_id = [];
 reward_data.period = [];
 reward_data.behavior = [];
-reward_data.coupling = [];
+reward_data.duration = [];  % in seconds
 
 n_valid_reward = 0;
+total_patches_reward = 0;
 
 for sess_idx = 1:length(sessions_reward)
     session = sessions_reward{sess_idx};
 
     % Check required fields
-    if ~isfield(session, 'coupling_results_multiband') || ...
-       ~isfield(session, 'NeuralTime') || ...
+    if ~isfield(session, 'NeuralTime') || ...
        ~isfield(session, 'TriggerMid') || ...
        sess_idx > length(prediction_sessions_reward)
         continue;
@@ -194,27 +188,16 @@ for sess_idx = 1:length(sessions_reward)
 
     n_valid_reward = n_valid_reward + 1;
 
-    % Extract coupling data
-    coupling = session.coupling_results_multiband.band_results{1}.MI_values;
-    coupling_time = session.coupling_results_multiband.band_results{1}.window_times;
-
-    % Extract prediction data
+    neural_time = session.NeuralTime;
     prediction_scores = prediction_sessions_reward(sess_idx).prediction_scores;
     prediction_ind = 1:20:length(session.TriggerMid);
     prediction_ind = prediction_ind + 10;
     prediction_time = session.TriggerMid(prediction_ind);
 
-    % Interpolate coupling to prediction times
-    coupling_intp = interp1(coupling_time, coupling, prediction_time, 'nearest');
-
     % Define period boundaries based on time (in seconds)
     time_boundaries = [0, 8*60, 16*60, 24*60, 30*60];
     period_boundaries = [session.TriggerMid(1), ...
                          time_boundaries(2:end) + session.TriggerMid(1)];
-
-    % Calculate baseline for normalization (Period 1)
-    baselineMean = nan(1, config.n_behaviors);
-    baselinesStd = nan(1, config.n_behaviors);
 
     % Process each period
     for period = 1:4
@@ -228,47 +211,48 @@ for sess_idx = 1:length(sessions_reward)
             continue;
         end
 
-        prediction_index = find(prediction_idx);
+        % Get predictions for this period
+        predictions_in_period = prediction_scores(prediction_idx, :);
 
-        % Collect all coupling values and behaviors in this period
-        allcoupling_val = [];
-        alldominant_beh = [];
+        % Find dominant behavior for each window
+        [max_confidence, dominant_beh] = max(predictions_in_period, [], 2);
 
-        for pred_idx = 1:length(prediction_index)
-            [max_conf, dominant_beh] = max(prediction_scores(prediction_index(pred_idx), :));
-            if max_conf > config.confidence_threshold
-                coupling_val = coupling_intp(prediction_index(pred_idx));
-                allcoupling_val = [allcoupling_val, coupling_val];
-                alldominant_beh = [alldominant_beh, dominant_beh];
-            end
+        % Filter by confidence threshold
+        valid_mask = max_confidence > config.confidence_threshold;
+        valid_dominant = dominant_beh(valid_mask);
+
+        if length(valid_dominant) < 2
+            continue;
         end
 
-        % Process each behavior
-        for behID = 1:config.n_behaviors
-            % Calculate baseline from Period 1
-            if period == 1
-                baselineMean(behID) = nanmean(allcoupling_val(alldominant_beh == behID));
-                baselinesStd(behID) = nanstd(allcoupling_val(alldominant_beh == behID));
-            end
+        % Find consecutive patches
+        behavior_changes = [1; find(diff(valid_dominant) ~= 0) + 1; length(valid_dominant) + 1];
 
-            % Normalize coupling values
-            behavior_coupling = allcoupling_val(alldominant_beh == behID);
-            normed_beh_coupling = (behavior_coupling - baselineMean(behID)) ./ baselinesStd(behID);
+        % Extract each patch
+        for patch_idx = 1:(length(behavior_changes) - 1)
+            patch_start = behavior_changes(patch_idx);
+            patch_end = behavior_changes(patch_idx + 1) - 1;
 
-            % Store individual data points
-            n_points = length(normed_beh_coupling);
-            if n_points > 0
-                reward_data.session_id = [reward_data.session_id; repmat(n_valid_reward, n_points, 1)];
-                reward_data.period = [reward_data.period; repmat(period, n_points, 1)];
-                reward_data.behavior = [reward_data.behavior; repmat(behID, n_points, 1)];
-                reward_data.coupling = [reward_data.coupling; normed_beh_coupling(:)];
-            end
+            patch_behavior = valid_dominant(patch_start);
+            patch_duration_windows = patch_end - patch_start + 1;
+
+            % Convert to seconds
+            patch_duration_seconds = patch_duration_windows * config.prediction_framerate;
+
+            % Store patch
+            reward_data.session_id(end+1) = n_valid_reward;
+            reward_data.period(end+1) = period;
+            reward_data.behavior(end+1) = patch_behavior;
+            reward_data.duration(end+1) = patch_duration_seconds;
+
+            total_patches_reward = total_patches_reward + 1;
         end
     end
 end
 
 fprintf('✓ Processed %d reward sessions\n', n_valid_reward);
-fprintf('  Data points: %d\n\n', length(reward_data.session_id));
+fprintf('  Total patches extracted: %d\n', total_patches_reward);
+fprintf('  Mean patches per session: %.1f\n\n', total_patches_reward / n_valid_reward);
 
 %% ========================================================================
 %  SECTION 5: COMBINE DATASETS
@@ -289,16 +273,16 @@ combined_data = struct();
 combined_data.session_id = [aversive_data.session_id(:); reward_data.session_id(:)];
 combined_data.period = [aversive_data.period(:); reward_data.period(:)];
 combined_data.behavior = [aversive_data.behavior(:); reward_data.behavior(:)];
-combined_data.coupling = [aversive_data.coupling(:); reward_data.coupling(:)];
+combined_data.duration = [aversive_data.duration(:); reward_data.duration(:)];
 combined_data.session_type = [aversive_data.session_type; reward_data.session_type];
 
 % Convert to table
 tbl = table(combined_data.session_id, ...
             combined_data.period, ...
             combined_data.behavior, ...
-            combined_data.coupling, ...
+            combined_data.duration, ...
             combined_data.session_type, ...
-            'VariableNames', {'Session', 'Period', 'Behavior', 'Coupling', 'SessionType'});
+            'VariableNames', {'Session', 'Period', 'Behavior', 'Duration', 'SessionType'});
 
 % Convert to categorical
 tbl.Session = categorical(tbl.Session);
@@ -307,12 +291,18 @@ tbl.Behavior = categorical(tbl.Behavior, 1:7, config.behavior_names);
 tbl.SessionType = categorical(tbl.SessionType);
 
 fprintf('✓ Combined dataset created\n');
-fprintf('  Total rows: %d\n', height(tbl));
+fprintf('  Total rows (patches): %d\n', height(tbl));
 fprintf('  Sessions: %d total\n', length(unique(tbl.Session)));
-fprintf('    - Aversive: %d sessions\n', n_valid_aversive);
-fprintf('    - Reward: %d sessions\n', n_valid_reward);
+fprintf('    - Aversive: %d sessions, %d patches\n', n_valid_aversive, total_patches_aversive);
+fprintf('    - Reward: %d sessions, %d patches\n', n_valid_reward, total_patches_reward);
 fprintf('  Periods: %d\n', length(unique(tbl.Period)));
 fprintf('  Behaviors: %d\n\n', length(unique(tbl.Behavior)));
+
+% Display duration statistics
+fprintf('Duration statistics (seconds):\n');
+fprintf('  Overall mean: %.2f ± %.2f\n', mean(tbl.Duration), std(tbl.Duration));
+fprintf('  Median: %.2f\n', median(tbl.Duration));
+fprintf('  Range: [%.2f, %.2f]\n\n', min(tbl.Duration), max(tbl.Duration));
 
 % Display first 20 rows
 fprintf('First 20 rows of data:\n');
@@ -323,11 +313,11 @@ disp(tbl(1:min(20, height(tbl)), :));
 %  ========================================================================
 
 fprintf('\n=== FITTING LINEAR MIXED-EFFECTS MODEL ===\n');
-fprintf('Formula: Coupling ~ Period * Behavior * SessionType + (1|Session)\n');
+fprintf('Formula: Duration ~ Period * Behavior * SessionType + (1|Session)\n');
 fprintf('This may take a few minutes...\n\n');
 
 try
-    lme_full = fitlme(tbl, 'Coupling ~ Period * Behavior * SessionType + (1|Session)', ...
+    lme_full = fitlme(tbl, 'Duration ~ Period * Behavior * SessionType + (1|Session)', ...
                       'FitMethod', 'REML');
 
     fprintf('✓ Full model fitted successfully\n\n');
@@ -420,7 +410,7 @@ for b = 1:config.n_behaviors
         comparison_results.CI_upper(end+1) = CI_upper;
 
         % Print results
-        fprintf('  P%d: Aver=%.3f, Rew=%.3f, Diff=%.3f (SE=%.3f), t=%.2f, p=%.4f', ...
+        fprintf('  P%d: Aver=%.2fs, Rew=%.2fs, Diff=%.2fs (SE=%.2f), t=%.2f, p=%.4f', ...
                p, aversive_mean, reward_mean, difference, SE_diff, t_stat, pval);
 
         if pval < 0.001
@@ -471,16 +461,16 @@ end
 fprintf('\n');
 
 %% ========================================================================
-%  SECTION 8: VISUALIZE - Session-level means with mean lines
+%  SECTION 8: VISUALIZE - Session-level mean durations
 %  ========================================================================
 
-fprintf('Creating visualization with session-level data...\n');
+fprintf('Creating visualization with session-level mean durations...\n');
 
-% Calculate session-level means first
+% Calculate session-level mean durations
 session_means_aversive = groupsummary(tbl(tbl.SessionType == 'Aversive', :), ...
-                                      {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
+                                      {'Session', 'Period', 'Behavior'}, 'mean', 'Duration');
 session_means_reward = groupsummary(tbl(tbl.SessionType == 'Reward', :), ...
-                                    {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
+                                    {'Session', 'Period', 'Behavior'}, 'mean', 'Duration');
 
 % Define colors
 color_aversive = [1, 0.6, 0.6];      % Red (lighter for individual sessions)
@@ -507,10 +497,10 @@ for b = 1:config.n_behaviors
         % Sort by period
         [~, sort_idx] = sort(double(sess_data.Period));
         periods = double(sess_data.Period(sort_idx));
-        coupling_vals = sess_data.mean_Coupling(sort_idx);
+        duration_vals = sess_data.mean_Duration(sort_idx);
 
         % Plot with transparency
-        plot(periods, coupling_vals, 'o-', ...
+        plot(periods, duration_vals, 'o-', ...
              'Color', color_aversive, ...
              'LineWidth', 1, ...
              'MarkerSize', 4, ...
@@ -529,10 +519,10 @@ for b = 1:config.n_behaviors
         % Sort by period
         [~, sort_idx] = sort(double(sess_data.Period));
         periods = double(sess_data.Period(sort_idx));
-        coupling_vals = sess_data.mean_Coupling(sort_idx);
+        duration_vals = sess_data.mean_Duration(sort_idx);
 
         % Plot with transparency
-        plot(periods, coupling_vals, 's-', ...
+        plot(periods, duration_vals, 's-', ...
              'Color', color_reward, ...
              'LineWidth', 1, ...
              'MarkerSize', 4, ...
@@ -546,7 +536,7 @@ for b = 1:config.n_behaviors
 
     for p = 1:4
         % Aversive mean
-        aversive_period_data = aversive_beh.mean_Coupling(double(aversive_beh.Period) == p);
+        aversive_period_data = aversive_beh.mean_Duration(double(aversive_beh.Period) == p);
         if ~isempty(aversive_period_data)
             mean_aversive(p) = nanmean(aversive_period_data);
         else
@@ -554,7 +544,7 @@ for b = 1:config.n_behaviors
         end
 
         % Reward mean
-        reward_period_data = reward_beh.mean_Coupling(double(reward_beh.Period) == p);
+        reward_period_data = reward_beh.mean_Duration(double(reward_beh.Period) == p);
         if ~isempty(reward_period_data)
             mean_reward(p) = nanmean(reward_period_data);
         else
@@ -577,7 +567,7 @@ for b = 1:config.n_behaviors
 
     % Get y-axis limits for star placement
     all_vals = [mean_aversive; mean_reward; ...
-                aversive_beh.mean_Coupling; reward_beh.mean_Coupling];
+                aversive_beh.mean_Duration; reward_beh.mean_Duration];
     y_min = min(all_vals);
     y_max = max(all_vals);
     y_range = y_max - y_min;
@@ -633,12 +623,12 @@ for b = 1:config.n_behaviors
 
     % Formatting
     xlabel('Period', 'FontSize', 11);
-    ylabel('Coupling (Z-score)', 'FontSize', 11);
+    ylabel('Patch Duration (seconds)', 'FontSize', 11);
     xticks(1:4);
     xticklabels({'P1', 'P2', 'P3', 'P4'});
 
     % Adjust y-limits to accommodate stars
-    ylim([max(y_min - 0.1 * y_range, -2), y_max + 0.25 * y_range]);
+    ylim([max(0, y_min - 0.1 * y_range), y_max + 0.25 * y_range]);
 
     if b == 1
         legend([h_aver, h_rew], 'Location', 'northwest', 'FontSize', 10);
@@ -653,7 +643,7 @@ end
 linkaxes(ax, 'xy');
 
 % Add overall title
-sgtitle({'Coupling Strength: Aversive vs Reward', ...
+sgtitle({'Behavioral Patch Duration: Aversive vs Reward', ...
          'Aversive (red); Reward (green)', ...
          'Transparent lines = individual sessions; Thick lines = group means', ...
          'Stars: * q<0.05, ** q<0.01, *** q<0.001 (FDR-corrected pairwise comparisons)'}, ...
@@ -693,16 +683,16 @@ pred_tbl = table(categorical(ones(size(pred_grid, 1), 1)), ...  % Dummy session
 
 % Get predictions
 try
-    [pred_coupling, pred_CI] = predict(lme_full, pred_tbl, 'Conditional', false);
+    [pred_duration, pred_CI] = predict(lme_full, pred_tbl, 'Conditional', false);
     fprintf('✓ Model predictions generated (population-level)\n');
 catch ME
     fprintf('❌ Failed to generate predictions: %s\n', ME.message);
-    pred_coupling = [];
+    pred_duration = [];
 end
 
-if ~isempty(pred_coupling)
+if ~isempty(pred_duration)
     % Reshape predictions for plotting
-    pred_matrix = reshape(pred_coupling, [4, config.n_behaviors, 2]);
+    pred_matrix = reshape(pred_duration, [4, config.n_behaviors, 2]);
     pred_CI_lower = reshape(pred_CI(:,1), [4, config.n_behaviors, 2]);
     pred_CI_upper = reshape(pred_CI(:,2), [4, config.n_behaviors, 2]);
 
@@ -802,7 +792,7 @@ if ~isempty(pred_coupling)
             [min_pval, most_sig_period] = min(period_pvals(b, :));
             effect_size = abs(aversive_pred(most_sig_period) - reward_pred(most_sig_period));
 
-            text_str = sprintf('P%d: q=%.3f\nΔ=%.2f', ...
+            text_str = sprintf('P%d: q=%.3f\nΔ=%.1fs', ...
                              most_sig_period, min_pval, effect_size);
 
             text(0.98, 0.02, text_str, ...
@@ -827,12 +817,12 @@ if ~isempty(pred_coupling)
 
         % Formatting
         xlabel('Period', 'FontSize', 11);
-        ylabel('Coupling (Z-score)', 'FontSize', 11);
+        ylabel('Patch Duration (seconds)', 'FontSize', 11);
         xticks(1:4);
         xticklabels({'P1', 'P2', 'P3', 'P4'});
 
         % Adjust y-limits
-        ylim([max(y_min - 0.1 * y_range, -2), y_max + 0.25 * y_range]);
+        ylim([max(0, y_min - 0.1 * y_range), y_max + 0.25 * y_range]);
 
         if b == 1
             legend([h_aver_pred, h_rew_pred], 'Location', 'northwest', 'FontSize', 10);
@@ -847,7 +837,7 @@ if ~isempty(pred_coupling)
     linkaxes(ax_pred, 'xy');
 
     % Add overall title
-    sgtitle({'Model Predictions: Aversive vs Reward', ...
+    sgtitle({'Model Predictions: Behavioral Patch Duration (Aversive vs Reward)', ...
              'Lines = LME model predictions; Shaded areas = 95% confidence intervals', ...
              'Stars: * q<0.05, ** q<0.01, *** q<0.001 (FDR-corrected pairwise comparisons)', ...
              'Text boxes show most significant period with q-value and effect size (Δ)'}, ...
@@ -873,8 +863,10 @@ end
 % results.period_pvals = period_pvals;
 % results.n_aversive = n_valid_aversive;
 % results.n_reward = n_valid_reward;
+% results.total_patches_aversive = total_patches_aversive;
+% results.total_patches_reward = total_patches_reward;
 %
-% save('coupling_aversive_vs_reward_results.mat', 'results');
+% save('duration_aversive_vs_reward_results.mat', 'results');
 %
-% fprintf('✓ Results saved to: coupling_aversive_vs_reward_results.mat\n');
+% fprintf('✓ Results saved to: duration_aversive_vs_reward_results.mat\n');
 fprintf('\n=== ANALYSIS COMPLETE ===\n');
