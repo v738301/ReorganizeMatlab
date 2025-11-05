@@ -37,8 +37,8 @@ config.feature_to_sort = [];  % Used if sort_method = 'feature'
 config.show_dendrogram = true;  % Show hierarchical clustering dendrogram
 config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
-config.exclude_categories = {};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
-config.separate_by_session = false;  % Analyze reward and aversive sessions separately
+config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
+config.separate_by_session = true;  % Analyze reward and aversive sessions separately
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
