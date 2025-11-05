@@ -1,10 +1,11 @@
 %% ========================================================================
-%  COUPLING STRENGTH ANALYSIS: Period × Behavior × SessionType
-%  MODIFIED: Uses post-hoc pairwise comparisons with FDR correction
+%  COUPLING STRENGTH ANALYSIS: Period × Behavior × ResponseType
+%  Session-level aggregation with breathing-LFP coupling
+%  MODIFIED: Separates Aversive into Responsive vs Non-Responsive+Reward
 %  ========================================================================
 %
-%  Analysis: Coupling ~ Period × Behavior × SessionType
-%  SessionType: Aversive vs Reward
+%  Analysis: Coupling ~ Period × Behavior × ResponseType
+%  ResponseType: Responsive (Aversive Group 1) vs Non-Responsive (Aversive Group 2 + Reward)
 %  Periods: P1-P4 (matched across both session types)
 %  Method: Individual coupling data points aggregated by session
 %
@@ -17,14 +18,22 @@ clear all
 %  SECTION 1: CONFIGURATION
 %  ========================================================================
 
-fprintf('=== COUPLING STRENGTH ANALYSIS: AVERSIVE vs REWARD ===\n');
-fprintf('Period × Behavior × SessionType\n\n');
+fprintf('=== COUPLING STRENGTH ANALYSIS: RESPONSIVE vs NON-RESPONSIVE ===\n');
+fprintf('Period × Behavior × ResponseType\n\n');
 
 config = struct();
 config.behavior_names = {'Reward', 'Walking', 'Rearing', 'Scanning/Air-Sniff', ...
                          'Ground-Sniff', 'Grooming', 'Standing/Immobility'};
 config.n_behaviors = 7;
 config.confidence_threshold = 0.3;
+
+% Aversive clustering result
+% 1 = responsive, 2 = non-responsive
+config.Aversive_clustering_result = [1,1,2,1,1,1,2,2,1,2,1,2,2,2,2,2,2,2,2,2,2,2,2,2];
+
+fprintf('Aversive session classification:\n');
+fprintf('  Responsive (Group 1): %d sessions\n', sum(config.Aversive_clustering_result == 1));
+fprintf('  Non-Responsive (Group 2): %d sessions\n\n', sum(config.Aversive_clustering_result == 2));
 
 %% ========================================================================
 %  SECTION 2: LOAD DATA
@@ -57,19 +66,20 @@ catch ME
 end
 
 %% ========================================================================
-%  SECTION 3: EXTRACT AVERSIVE DATA (P1-P4 only)
+%  SECTION 3: EXTRACT RESPONSIVE AVERSIVE DATA (Group 1, P1-P4 only)
 %  ========================================================================
 
-fprintf('Extracting aversive session data (P1-P4)...\n');
+fprintf('Extracting RESPONSIVE aversive session data (Group 1, P1-P4)...\n');
 
 % Initialize storage
-aversive_data = struct();
-aversive_data.session_id = [];
-aversive_data.period = [];
-aversive_data.behavior = [];
-aversive_data.coupling = [];
+responsive_data = struct();
+responsive_data.session_id = [];
+responsive_data.period = [];
+responsive_data.behavior = [];
+responsive_data.coupling = [];
 
-n_valid_aversive = 0;
+n_valid_responsive = 0;
+clustering_idx = 0;  % Track position in clustering result
 
 for sess_idx = 1:length(sessions_aversive)
     session = sessions_aversive{sess_idx};
@@ -88,7 +98,15 @@ for sess_idx = 1:length(sessions_aversive)
         continue;
     end
 
-    n_valid_aversive = n_valid_aversive + 1;
+    clustering_idx = clustering_idx + 1;
+
+    % Only process if this is a RESPONSIVE session (Group 1)
+    if clustering_idx > length(config.Aversive_clustering_result) || ...
+       config.Aversive_clustering_result(clustering_idx) ~= 1
+        continue;
+    end
+
+    n_valid_responsive = n_valid_responsive + 1;
 
     % Extract coupling data
     coupling = session.coupling_results_multiband.band_results{1}.MI_values;
@@ -154,20 +172,139 @@ for sess_idx = 1:length(sessions_aversive)
             % Store individual data points
             n_points = length(normed_beh_coupling);
             if n_points > 0
-                aversive_data.session_id = [aversive_data.session_id; repmat(n_valid_aversive, n_points, 1)];
-                aversive_data.period = [aversive_data.period; repmat(period, n_points, 1)];
-                aversive_data.behavior = [aversive_data.behavior; repmat(behID, n_points, 1)];
-                aversive_data.coupling = [aversive_data.coupling; normed_beh_coupling(:)];
+                responsive_data.session_id = [responsive_data.session_id; repmat(n_valid_responsive, n_points, 1)];
+                responsive_data.period = [responsive_data.period; repmat(period, n_points, 1)];
+                responsive_data.behavior = [responsive_data.behavior; repmat(behID, n_points, 1)];
+                responsive_data.coupling = [responsive_data.coupling; normed_beh_coupling(:)];
             end
         end
     end
 end
 
-fprintf('✓ Processed %d aversive sessions\n', n_valid_aversive);
-fprintf('  Data points: %d\n\n', length(aversive_data.session_id));
+fprintf('✓ Processed %d RESPONSIVE aversive sessions\n', n_valid_responsive);
+fprintf('  Data points: %d\n\n', length(responsive_data.session_id));
 
 %% ========================================================================
-%  SECTION 4: EXTRACT REWARD DATA (P1-P4)
+%  SECTION 4: EXTRACT NON-RESPONSIVE AVERSIVE DATA (Group 2, P1-P4)
+%  ========================================================================
+
+fprintf('Extracting NON-RESPONSIVE aversive session data (Group 2, P1-P4)...\n');
+
+% Initialize storage
+nonresponsive_data = struct();
+nonresponsive_data.session_id = [];
+nonresponsive_data.period = [];
+nonresponsive_data.behavior = [];
+nonresponsive_data.coupling = [];
+
+n_valid_nonresponsive = 0;
+clustering_idx = 0;  % Reset counter
+
+for sess_idx = 1:length(sessions_aversive)
+    session = sessions_aversive{sess_idx};
+
+    % Check required fields
+    if ~isfield(session, 'all_aversive_time') || ...
+       ~isfield(session, 'coupling_results_multiband') || ...
+       ~isfield(session, 'NeuralTime') || ...
+       ~isfield(session, 'TriggerMid') || ...
+       sess_idx > length(prediction_sessions_aversive)
+        continue;
+    end
+
+    aversive_times = session.all_aversive_time;
+    if length(aversive_times) < 6
+        continue;
+    end
+
+    clustering_idx = clustering_idx + 1;
+
+    % Only process if this is a NON-RESPONSIVE session (Group 2)
+    if clustering_idx > length(config.Aversive_clustering_result) || ...
+       config.Aversive_clustering_result(clustering_idx) ~= 2
+        continue;
+    end
+
+    n_valid_nonresponsive = n_valid_nonresponsive + 1;
+
+    % Extract coupling data
+    coupling = session.coupling_results_multiband.band_results{1}.MI_values;
+    coupling_time = session.coupling_results_multiband.band_results{1}.window_times;
+
+    % Extract prediction data
+    prediction_scores = prediction_sessions_aversive(sess_idx).prediction_scores;
+    prediction_ind = 1:20:length(session.TriggerMid);
+    prediction_ind = prediction_ind + 10;
+    prediction_time = session.TriggerMid(prediction_ind);
+
+    % Interpolate coupling to prediction times
+    coupling_intp = interp1(coupling_time, coupling, prediction_time, 'nearest');
+
+    % Define period boundaries (P1-P4 only)
+    period_boundaries = [session.TriggerMid(1), ...
+                         aversive_times(1:3)' + session.TriggerMid(1), ...
+                         aversive_times(4) + session.TriggerMid(1)];
+
+    % Calculate baseline for normalization (Period 1)
+    baselineMean = nan(1, config.n_behaviors);
+    baselinesStd = nan(1, config.n_behaviors);
+
+    % Process each period
+    for period = 1:4
+        period_start = period_boundaries(period);
+        period_end = period_boundaries(period + 1);
+
+        % Find prediction windows in this period
+        prediction_idx = prediction_time >= period_start & prediction_time < period_end;
+
+        if sum(prediction_idx) < 10
+            continue;
+        end
+
+        prediction_index = find(prediction_idx);
+
+        % Collect all coupling values and behaviors in this period
+        allcoupling_val = [];
+        alldominant_beh = [];
+
+        for pred_idx = 1:length(prediction_index)
+            [max_conf, dominant_beh] = max(prediction_scores(prediction_index(pred_idx), :));
+            if max_conf > config.confidence_threshold
+                coupling_val = coupling_intp(prediction_index(pred_idx));
+                allcoupling_val = [allcoupling_val, coupling_val];
+                alldominant_beh = [alldominant_beh, dominant_beh];
+            end
+        end
+
+        % Process each behavior
+        for behID = 1:config.n_behaviors
+            % Calculate baseline from Period 1
+            if period == 1
+                baselineMean(behID) = nanmean(allcoupling_val(alldominant_beh == behID));
+                baselinesStd(behID) = nanstd(allcoupling_val(alldominant_beh == behID));
+            end
+
+            % Normalize coupling values
+            behavior_coupling = allcoupling_val(alldominant_beh == behID);
+            normed_beh_coupling = (behavior_coupling - baselineMean(behID)) ./ baselinesStd(behID);
+
+            % Store individual data points
+            n_points = length(normed_beh_coupling);
+            if n_points > 0
+                nonresponsive_data.session_id = [nonresponsive_data.session_id; repmat(n_valid_nonresponsive, n_points, 1)];
+                nonresponsive_data.period = [nonresponsive_data.period; repmat(period, n_points, 1)];
+                nonresponsive_data.behavior = [nonresponsive_data.behavior; repmat(behID, n_points, 1)];
+                nonresponsive_data.coupling = [nonresponsive_data.coupling; normed_beh_coupling(:)];
+            end
+        end
+    end
+end
+
+fprintf('✓ Processed %d NON-RESPONSIVE aversive sessions\n', n_valid_nonresponsive);
+fprintf('  Data points: %d\n\n', length(nonresponsive_data.session_id));
+
+%% ========================================================================
+%  SECTION 5: EXTRACT REWARD DATA (P1-P4) - To merge with Non-Responsive
 %  ========================================================================
 
 fprintf('Extracting reward session data (P1-P4)...\n');
@@ -271,46 +408,63 @@ fprintf('✓ Processed %d reward sessions\n', n_valid_reward);
 fprintf('  Data points: %d\n\n', length(reward_data.session_id));
 
 %% ========================================================================
-%  SECTION 5: COMBINE DATASETS
+%  SECTION 6: COMBINE DATASETS - Merge Non-Responsive + Reward
 %  ========================================================================
 
 fprintf('Combining datasets...\n');
+fprintf('  Responsive group: Aversive Group 1\n');
+fprintf('  Non-Responsive group: Aversive Group 2 + Reward sessions\n\n');
 
-% Add SessionType column
-aversive_data.session_type = repmat({'Aversive'}, length(aversive_data.session_id), 1);
-reward_data.session_type = repmat({'Reward'}, length(reward_data.session_id), 1);
+% Add ResponseType column
+responsive_data.response_type = repmat({'Responsive'}, length(responsive_data.session_id), 1);
 
-% Make session IDs unique across session types
-max_aversive_id = max(aversive_data.session_id);
-reward_data.session_id = reward_data.session_id + max_aversive_id;
+% Merge non-responsive aversive with reward sessions
+% First, make session IDs unique
+max_nonresponsive_id = max(nonresponsive_data.session_id);
+reward_data.session_id = reward_data.session_id + max_nonresponsive_id;
 
-% Combine all fields
+% Combine non-responsive aversive + reward into one group
+merged_nonresponsive = struct();
+merged_nonresponsive.session_id = [nonresponsive_data.session_id(:); reward_data.session_id(:)];
+merged_nonresponsive.period = [nonresponsive_data.period(:); reward_data.period(:)];
+merged_nonresponsive.behavior = [nonresponsive_data.behavior(:); reward_data.behavior(:)];
+merged_nonresponsive.coupling = [nonresponsive_data.coupling(:); reward_data.coupling(:)];
+merged_nonresponsive.response_type = repmat({'Non-Responsive'}, ...
+                                            length(merged_nonresponsive.session_id), 1);
+
+% Now combine Responsive vs Non-Responsive
 combined_data = struct();
-combined_data.session_id = [aversive_data.session_id(:); reward_data.session_id(:)];
-combined_data.period = [aversive_data.period(:); reward_data.period(:)];
-combined_data.behavior = [aversive_data.behavior(:); reward_data.behavior(:)];
-combined_data.coupling = [aversive_data.coupling(:); reward_data.coupling(:)];
-combined_data.session_type = [aversive_data.session_type; reward_data.session_type];
+combined_data.session_id = [responsive_data.session_id(:); merged_nonresponsive.session_id(:)];
+combined_data.period = [responsive_data.period(:); merged_nonresponsive.period(:)];
+combined_data.behavior = [responsive_data.behavior(:); merged_nonresponsive.behavior(:)];
+combined_data.coupling = [responsive_data.coupling(:); merged_nonresponsive.coupling(:)];
+combined_data.response_type = [responsive_data.response_type; merged_nonresponsive.response_type];
+
+% Make session IDs globally unique
+max_responsive_id = max(responsive_data.session_id);
+nonresponsive_mask = strcmp(combined_data.response_type, 'Non-Responsive');
+combined_data.session_id(nonresponsive_mask) = combined_data.session_id(nonresponsive_mask) + max_responsive_id;
 
 % Convert to table
 tbl = table(combined_data.session_id, ...
             combined_data.period, ...
             combined_data.behavior, ...
             combined_data.coupling, ...
-            combined_data.session_type, ...
-            'VariableNames', {'Session', 'Period', 'Behavior', 'Coupling', 'SessionType'});
+            combined_data.response_type, ...
+            'VariableNames', {'Session', 'Period', 'Behavior', 'Coupling', 'ResponseType'});
 
 % Convert to categorical
 tbl.Session = categorical(tbl.Session);
 tbl.Period = categorical(tbl.Period);
 tbl.Behavior = categorical(tbl.Behavior, 1:7, config.behavior_names);
-tbl.SessionType = categorical(tbl.SessionType);
+tbl.ResponseType = categorical(tbl.ResponseType);
 
 fprintf('✓ Combined dataset created\n');
 fprintf('  Total rows: %d\n', height(tbl));
 fprintf('  Sessions: %d total\n', length(unique(tbl.Session)));
-fprintf('    - Aversive: %d sessions\n', n_valid_aversive);
-fprintf('    - Reward: %d sessions\n', n_valid_reward);
+fprintf('    - Responsive: %d sessions\n', n_valid_responsive);
+fprintf('    - Non-Responsive: %d sessions (%d aversive + %d reward)\n', ...
+        n_valid_nonresponsive + n_valid_reward, n_valid_nonresponsive, n_valid_reward);
 fprintf('  Periods: %d\n', length(unique(tbl.Period)));
 fprintf('  Behaviors: %d\n\n', length(unique(tbl.Behavior)));
 
@@ -319,15 +473,15 @@ fprintf('First 20 rows of data:\n');
 disp(tbl(1:min(20, height(tbl)), :));
 
 %% ========================================================================
-%  SECTION 6: FIT LME MODEL
+%  SECTION 7: FIT LME MODEL
 %  ========================================================================
 
 fprintf('\n=== FITTING LINEAR MIXED-EFFECTS MODEL ===\n');
-fprintf('Formula: Coupling ~ Period * Behavior * SessionType + (1|Session)\n');
+fprintf('Formula: Coupling ~ Period * Behavior * ResponseType + (1|Session)\n');
 fprintf('This may take a few minutes...\n\n');
 
 try
-    lme_full = fitlme(tbl, 'Coupling ~ Period * Behavior * SessionType + (1|Session)', ...
+    lme_full = fitlme(tbl, 'Coupling ~ Period * Behavior * ResponseType + (1|Session)', ...
                       'FitMethod', 'REML');
 
     fprintf('✓ Full model fitted successfully\n\n');
@@ -343,21 +497,21 @@ catch ME
 end
 
 %% ========================================================================
-%  SECTION 7: POST-HOC PAIRWISE COMPARISONS
-%  Direct test: Aversive vs Reward at each Period × Behavior
+%  SECTION 8: POST-HOC PAIRWISE COMPARISONS
+%  Direct test: Responsive vs Non-Responsive at each Period × Behavior
 %  ========================================================================
 
 fprintf('=== POST-HOC PAIRWISE COMPARISONS ===\n');
-fprintf('Testing: Aversive vs Reward at each Period × Behavior combination\n\n');
+fprintf('Testing: Responsive vs Non-Responsive at each Period × Behavior combination\n\n');
 
 % Initialize results storage
 comparison_results = struct();
 comparison_results.behavior = [];
 comparison_results.behavior_name = {};
 comparison_results.period = [];
-comparison_results.aversive_mean = [];
-comparison_results.reward_mean = [];
-comparison_results.difference = [];      % Aversive - Reward
+comparison_results.responsive_mean = [];
+comparison_results.nonresponsive_mean = [];
+comparison_results.difference = [];      % Responsive - Non-Responsive
 comparison_results.SE_diff = [];
 comparison_results.t_stat = [];
 comparison_results.pvalue = [];
@@ -374,29 +528,29 @@ for b = 1:config.n_behaviors
     fprintf('%s:\n', beh_name);
 
     for p = 1:4
-        % Create prediction table for both session types at this period/behavior
+        % Create prediction table for both response types at this period/behavior
         pred_tbl_compare = table(...
             categorical([1; 1]), ...  % Dummy session
             categorical([p; p]), ...  % This period
             categorical([b; b], 1:7, config.behavior_names), ...  % This behavior
-            categorical({'Aversive'; 'Reward'}), ...
-            'VariableNames', {'Session', 'Period', 'Behavior', 'SessionType'});
+            categorical({'Responsive'; 'Non-Responsive'}), ...
+            'VariableNames', {'Session', 'Period', 'Behavior', 'ResponseType'});
 
         % Get predictions with confidence intervals
         [pred_vals, pred_CI] = predict(lme_full, pred_tbl_compare, 'Conditional', false);
 
         % Extract values
-        aversive_mean = pred_vals(1);
-        reward_mean = pred_vals(2);
-        difference = aversive_mean - reward_mean;
+        responsive_mean = pred_vals(1);
+        nonresponsive_mean = pred_vals(2);
+        difference = responsive_mean - nonresponsive_mean;
 
         % Calculate SE from confidence intervals
         % CI = estimate ± 1.96*SE, so SE = (CI_upper - CI_lower) / (2*1.96)
-        SE_aversive = (pred_CI(1,2) - pred_CI(1,1)) / (2 * 1.96);
-        SE_reward = (pred_CI(2,2) - pred_CI(2,1)) / (2 * 1.96);
+        SE_responsive = (pred_CI(1,2) - pred_CI(1,1)) / (2 * 1.96);
+        SE_nonresponsive = (pred_CI(2,2) - pred_CI(2,1)) / (2 * 1.96);
 
         % SE of difference (assuming independence)
-        SE_diff = sqrt(SE_aversive^2 + SE_reward^2);
+        SE_diff = sqrt(SE_responsive^2 + SE_nonresponsive^2);
 
         % T-test for difference
         t_stat = difference / SE_diff;
@@ -410,8 +564,8 @@ for b = 1:config.n_behaviors
         comparison_results.behavior(end+1) = b;
         comparison_results.behavior_name{end+1} = beh_name;
         comparison_results.period(end+1) = p;
-        comparison_results.aversive_mean(end+1) = aversive_mean;
-        comparison_results.reward_mean(end+1) = reward_mean;
+        comparison_results.responsive_mean(end+1) = responsive_mean;
+        comparison_results.nonresponsive_mean(end+1) = nonresponsive_mean;
         comparison_results.difference(end+1) = difference;
         comparison_results.SE_diff(end+1) = SE_diff;
         comparison_results.t_stat(end+1) = t_stat;
@@ -420,8 +574,8 @@ for b = 1:config.n_behaviors
         comparison_results.CI_upper(end+1) = CI_upper;
 
         % Print results
-        fprintf('  P%d: Aver=%.3f, Rew=%.3f, Diff=%.3f (SE=%.3f), t=%.2f, p=%.4f', ...
-               p, aversive_mean, reward_mean, difference, SE_diff, t_stat, pval);
+        fprintf('  P%d: Resp=%.3f, NonResp=%.3f, Diff=%.3f (SE=%.3f), t=%.2f, p=%.4f', ...
+               p, responsive_mean, nonresponsive_mean, difference, SE_diff, t_stat, pval);
 
         if pval < 0.001
             fprintf(' ***\n');
@@ -471,20 +625,20 @@ end
 fprintf('\n');
 
 %% ========================================================================
-%  SECTION 8: VISUALIZE - Session-level means with mean lines
+%  SECTION 9: VISUALIZE - Session-level means with mean lines
 %  ========================================================================
 
 fprintf('Creating visualization with session-level data...\n');
 
 % Calculate session-level means first
-session_means_aversive = groupsummary(tbl(tbl.SessionType == 'Aversive', :), ...
-                                      {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
-session_means_reward = groupsummary(tbl(tbl.SessionType == 'Reward', :), ...
-                                    {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
+session_means_responsive = groupsummary(tbl(tbl.ResponseType == 'Responsive', :), ...
+                                        {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
+session_means_nonresponsive = groupsummary(tbl(tbl.ResponseType == 'Non-Responsive', :), ...
+                                           {'Session', 'Period', 'Behavior'}, 'mean', 'Coupling');
 
 % Define colors
-color_aversive = [1, 0.6, 0.6];      % Red (lighter for individual sessions)
-color_reward = [0.6, 1, 0.6];        % Green (lighter for individual sessions)
+color_responsive = [1, 0.6, 0.6];      % Red (lighter for individual sessions)
+color_nonresponsive = [0.6, 0.6, 1];   % Blue (lighter for individual sessions)
 
 figure('Position', [50, 50, 1800, 1000]);
 
@@ -496,13 +650,13 @@ for b = 1:config.n_behaviors
     % Extract data for this behavior
     behavior_name = config.behavior_names{b};
 
-    % Plot individual AVERSIVE sessions
-    aversive_beh = session_means_aversive(session_means_aversive.Behavior == behavior_name, :);
-    aversive_sessions = unique(aversive_beh.Session);
+    % Plot individual RESPONSIVE sessions
+    responsive_beh = session_means_responsive(session_means_responsive.Behavior == behavior_name, :);
+    responsive_sessions = unique(responsive_beh.Session);
 
-    for s = 1:length(aversive_sessions)
-        sess_mask = aversive_beh.Session == aversive_sessions(s);
-        sess_data = aversive_beh(sess_mask, :);
+    for s = 1:length(responsive_sessions)
+        sess_mask = responsive_beh.Session == responsive_sessions(s);
+        sess_data = responsive_beh(sess_mask, :);
 
         % Sort by period
         [~, sort_idx] = sort(double(sess_data.Period));
@@ -511,20 +665,20 @@ for b = 1:config.n_behaviors
 
         % Plot with transparency
         plot(periods, coupling_vals, 'o-', ...
-             'Color', color_aversive, ...
+             'Color', color_responsive, ...
              'LineWidth', 1, ...
              'MarkerSize', 4, ...
-             'MarkerFaceColor', color_aversive, ...
+             'MarkerFaceColor', color_responsive, ...
              'HandleVisibility', 'off');
     end
 
-    % Plot individual REWARD sessions
-    reward_beh = session_means_reward(session_means_reward.Behavior == behavior_name, :);
-    reward_sessions = unique(reward_beh.Session);
+    % Plot individual NON-RESPONSIVE sessions
+    nonresponsive_beh = session_means_nonresponsive(session_means_nonresponsive.Behavior == behavior_name, :);
+    nonresponsive_sessions = unique(nonresponsive_beh.Session);
 
-    for s = 1:length(reward_sessions)
-        sess_mask = reward_beh.Session == reward_sessions(s);
-        sess_data = reward_beh(sess_mask, :);
+    for s = 1:length(nonresponsive_sessions)
+        sess_mask = nonresponsive_beh.Session == nonresponsive_sessions(s);
+        sess_data = nonresponsive_beh(sess_mask, :);
 
         % Sort by period
         [~, sort_idx] = sort(double(sess_data.Period));
@@ -533,51 +687,51 @@ for b = 1:config.n_behaviors
 
         % Plot with transparency
         plot(periods, coupling_vals, 's-', ...
-             'Color', color_reward, ...
+             'Color', color_nonresponsive, ...
              'LineWidth', 1, ...
              'MarkerSize', 4, ...
-             'MarkerFaceColor', color_reward, ...
+             'MarkerFaceColor', color_nonresponsive, ...
              'HandleVisibility', 'off');
     end
 
     % Calculate and plot mean lines across sessions
-    mean_aversive = zeros(4, 1);
-    mean_reward = zeros(4, 1);
+    mean_responsive = zeros(4, 1);
+    mean_nonresponsive = zeros(4, 1);
 
     for p = 1:4
-        % Aversive mean
-        aversive_period_data = aversive_beh.mean_Coupling(double(aversive_beh.Period) == p);
-        if ~isempty(aversive_period_data)
-            mean_aversive(p) = nanmean(aversive_period_data);
+        % Responsive mean
+        responsive_period_data = responsive_beh.mean_Coupling(double(responsive_beh.Period) == p);
+        if ~isempty(responsive_period_data)
+            mean_responsive(p) = nanmean(responsive_period_data);
         else
-            mean_aversive(p) = NaN;
+            mean_responsive(p) = NaN;
         end
 
-        % Reward mean
-        reward_period_data = reward_beh.mean_Coupling(double(reward_beh.Period) == p);
-        if ~isempty(reward_period_data)
-            mean_reward(p) = nanmean(reward_period_data);
+        % Non-Responsive mean
+        nonresponsive_period_data = nonresponsive_beh.mean_Coupling(double(nonresponsive_beh.Period) == p);
+        if ~isempty(nonresponsive_period_data)
+            mean_nonresponsive(p) = nanmean(nonresponsive_period_data);
         else
-            mean_reward(p) = NaN;
+            mean_nonresponsive(p) = NaN;
         end
     end
 
     % Plot mean lines (thick, opaque)
-    h_aver = plot(1:4, mean_aversive, 'o-', ...
+    h_resp = plot(1:4, mean_responsive, 'o-', ...
                 'LineWidth', 3, 'MarkerSize', 10, ...
                 'Color', [1,0,0], ...
                 'MarkerFaceColor', [1,0,0], ...
-                'DisplayName', 'Aversive (mean)');
+                'DisplayName', 'Responsive (mean)');
 
-    h_rew = plot(1:4, mean_reward, 's-', ...
+    h_nonresp = plot(1:4, mean_nonresponsive, 's-', ...
                 'LineWidth', 3, 'MarkerSize', 10, ...
-                'Color', [0,0.6,0], ...
-                'MarkerFaceColor', [0,0.6,0], ...
-                'DisplayName', 'Reward (mean)');
+                'Color', [0,0,1], ...
+                'MarkerFaceColor', [0.6,0.6,1], ...
+                'DisplayName', 'Non-Responsive (mean)');
 
     % Get y-axis limits for star placement
-    all_vals = [mean_aversive; mean_reward; ...
-                aversive_beh.mean_Coupling; reward_beh.mean_Coupling];
+    all_vals = [mean_responsive; mean_nonresponsive; ...
+                responsive_beh.mean_Coupling; nonresponsive_beh.mean_Coupling];
     y_min = min(all_vals);
     y_max = max(all_vals);
     y_range = y_max - y_min;
@@ -641,7 +795,7 @@ for b = 1:config.n_behaviors
     ylim([max(y_min - 0.1 * y_range, -2), y_max + 0.25 * y_range]);
 
     if b == 1
-        legend([h_aver, h_rew], 'Location', 'northwest', 'FontSize', 10);
+        legend([h_resp, h_nonresp], 'Location', 'northwest', 'FontSize', 10);
     end
 
     grid on;
@@ -653,18 +807,19 @@ end
 linkaxes(ax, 'xy');
 
 % Add overall title
-sgtitle({'Coupling Strength: Aversive vs Reward', ...
-         'Aversive (red); Reward (green)', ...
+sgtitle({'Coupling Strength: Responsive vs Non-Responsive', ...
+         'Responsive = Aversive Group 1 (red); Non-Responsive = Aversive Group 2 + Reward (blue)', ...
          'Transparent lines = individual sessions; Thick lines = group means', ...
          'Stars: * q<0.05, ** q<0.01, *** q<0.001 (FDR-corrected pairwise comparisons)'}, ...
         'FontSize', 14, 'FontWeight', 'bold');
 
 fprintf('✓ Visualization complete\n');
-fprintf('  Plotted %d aversive sessions (red circles)\n', length(aversive_sessions));
-fprintf('  Plotted %d reward sessions (green squares)\n\n', length(reward_sessions));
+fprintf('  Plotted %d responsive sessions (red circles)\n', length(responsive_sessions));
+fprintf('  Plotted %d non-responsive sessions (blue squares)\n', length(nonresponsive_sessions));
+fprintf('    (%d from aversive Group 2 + %d from reward)\n\n', n_valid_nonresponsive, n_valid_reward);
 
 %% ========================================================================
-%  SECTION 9: MODEL PREDICTIONS FIGURE
+%  SECTION 10: MODEL PREDICTIONS FIGURE
 %  ========================================================================
 
 fprintf('\nCreating model predictions figure...\n');
@@ -672,14 +827,14 @@ fprintf('\nCreating model predictions figure...\n');
 % Generate predictions from the model
 periods = [1, 2, 3, 4];
 behaviors = 1:config.n_behaviors;
-session_types = {'Aversive', 'Reward'};
+response_types = {'Responsive', 'Non-Responsive'};
 
 % Create prediction grid
 pred_grid = [];
-for st = 1:length(session_types)
+for rt = 1:length(response_types)
     for b = 1:length(behaviors)
         for p = 1:length(periods)
-            pred_grid = [pred_grid; p, b, st];
+            pred_grid = [pred_grid; p, b, rt];
         end
     end
 end
@@ -688,8 +843,8 @@ end
 pred_tbl = table(categorical(ones(size(pred_grid, 1), 1)), ...  % Dummy session
                  categorical(pred_grid(:,1)), ...
                  categorical(pred_grid(:,2), 1:7, config.behavior_names), ...
-                 categorical(pred_grid(:,3), 1:2, session_types), ...
-                 'VariableNames', {'Session', 'Period', 'Behavior', 'SessionType'});
+                 categorical(pred_grid(:,3), 1:2, response_types), ...
+                 'VariableNames', {'Session', 'Period', 'Behavior', 'ResponseType'});
 
 % Get predictions
 try
@@ -715,44 +870,44 @@ if ~isempty(pred_coupling)
         hold on;
 
         % Extract predictions for this behavior
-        aversive_pred = pred_matrix(:, b, 1);
-        aversive_CI_lower = pred_CI_lower(:, b, 1);
-        aversive_CI_upper = pred_CI_upper(:, b, 1);
+        responsive_pred = pred_matrix(:, b, 1);
+        responsive_CI_lower = pred_CI_lower(:, b, 1);
+        responsive_CI_upper = pred_CI_upper(:, b, 1);
 
-        reward_pred = pred_matrix(:, b, 2);
-        reward_CI_lower = pred_CI_lower(:, b, 2);
-        reward_CI_upper = pred_CI_upper(:, b, 2);
+        nonresponsive_pred = pred_matrix(:, b, 2);
+        nonresponsive_CI_lower = pred_CI_lower(:, b, 2);
+        nonresponsive_CI_upper = pred_CI_upper(:, b, 2);
 
         % Plot confidence intervals as shaded areas
         x_fill = [1:4, fliplr(1:4)];
 
-        % Aversive CI
-        y_fill_aver = [aversive_CI_lower', fliplr(aversive_CI_upper')];
-        fill(x_fill, y_fill_aver, [1, 0.8, 0.8], ...
+        % Responsive CI
+        y_fill_resp = [responsive_CI_lower', fliplr(responsive_CI_upper')];
+        fill(x_fill, y_fill_resp, [1, 0.8, 0.8], ...
              'FaceAlpha', 0.3, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 
-        % Reward CI
-        y_fill_rew = [reward_CI_lower', fliplr(reward_CI_upper')];
-        fill(x_fill, y_fill_rew, [0.8, 1, 0.8], ...
+        % Non-Responsive CI
+        y_fill_nonresp = [nonresponsive_CI_lower', fliplr(nonresponsive_CI_upper')];
+        fill(x_fill, y_fill_nonresp, [0.8, 0.8, 1], ...
              'FaceAlpha', 0.3, 'EdgeColor', 'none', 'HandleVisibility', 'off');
 
         % Plot prediction lines
-        h_aver_pred = plot(1:4, aversive_pred, 'o-', ...
+        h_resp_pred = plot(1:4, responsive_pred, 'o-', ...
                     'LineWidth', 3, 'MarkerSize', 10, ...
                     'Color', [1,0,0], ...
                     'MarkerFaceColor', [1,0,0], ...
-                    'DisplayName', 'Aversive (predicted)');
+                    'DisplayName', 'Responsive (predicted)');
 
-        h_rew_pred = plot(1:4, reward_pred, 's-', ...
+        h_nonresp_pred = plot(1:4, nonresponsive_pred, 's-', ...
                     'LineWidth', 3, 'MarkerSize', 10, ...
-                    'Color', [0,0.6,0], ...
-                    'MarkerFaceColor', [0,0.6,0], ...
-                    'DisplayName', 'Reward (predicted)');
+                    'Color', [0,0,1], ...
+                    'MarkerFaceColor', [0.6,0.6,1], ...
+                    'DisplayName', 'Non-Responsive (predicted)');
 
         % Get y-axis limits for star placement
-        all_preds = [aversive_pred; reward_pred; ...
-                     aversive_CI_lower; aversive_CI_upper; ...
-                     reward_CI_lower; reward_CI_upper];
+        all_preds = [responsive_pred; nonresponsive_pred; ...
+                     responsive_CI_lower; responsive_CI_upper; ...
+                     nonresponsive_CI_lower; nonresponsive_CI_upper];
         y_min = min(all_preds);
         y_max = max(all_preds);
         y_range = y_max - y_min;
@@ -800,7 +955,7 @@ if ~isempty(pred_coupling)
         if any(period_pvals(b, :) < 0.05)
             sig_periods = find(period_pvals(b, :) < 0.05);
             [min_pval, most_sig_period] = min(period_pvals(b, :));
-            effect_size = abs(aversive_pred(most_sig_period) - reward_pred(most_sig_period));
+            effect_size = abs(responsive_pred(most_sig_period) - nonresponsive_pred(most_sig_period));
 
             text_str = sprintf('P%d: q=%.3f\nΔ=%.2f', ...
                              most_sig_period, min_pval, effect_size);
@@ -835,7 +990,7 @@ if ~isempty(pred_coupling)
         ylim([max(y_min - 0.1 * y_range, -2), y_max + 0.25 * y_range]);
 
         if b == 1
-            legend([h_aver_pred, h_rew_pred], 'Location', 'northwest', 'FontSize', 10);
+            legend([h_resp_pred, h_nonresp_pred], 'Location', 'northwest', 'FontSize', 10);
         end
 
         grid on;
@@ -847,7 +1002,7 @@ if ~isempty(pred_coupling)
     linkaxes(ax_pred, 'xy');
 
     % Add overall title
-    sgtitle({'Model Predictions: Aversive vs Reward', ...
+    sgtitle({'Model Predictions: Responsive vs Non-Responsive', ...
              'Lines = LME model predictions; Shaded areas = 95% confidence intervals', ...
              'Stars: * q<0.05, ** q<0.01, *** q<0.001 (FDR-corrected pairwise comparisons)', ...
              'Text boxes show most significant period with q-value and effect size (Δ)'}, ...
@@ -857,24 +1012,26 @@ if ~isempty(pred_coupling)
 end
 
 %% ========================================================================
-%  SECTION 10: SAVE RESULTS
+%  SECTION 11: SAVE RESULTS
 %  ========================================================================
-
+% 
 % fprintf('Saving results...\n');
-%
+% 
 % results = struct();
 % results.config = config;
-% results.aversive_data = aversive_data;
+% results.responsive_data = responsive_data;
+% results.nonresponsive_data = nonresponsive_data;
 % results.reward_data = reward_data;
 % results.combined_data = combined_data;
 % results.tbl = tbl;
 % results.lme_full = lme_full;
 % results.comparison_results = comparison_results;
 % results.period_pvals = period_pvals;
-% results.n_aversive = n_valid_aversive;
+% results.n_responsive = n_valid_responsive;
+% results.n_nonresponsive = n_valid_nonresponsive;
 % results.n_reward = n_valid_reward;
-%
-% save('coupling_aversive_vs_reward_results.mat', 'results');
-%
-% fprintf('✓ Results saved to: coupling_aversive_vs_reward_results.mat\n');
+% 
+% save('coupling_responsive_vs_nonresponsive_results.mat', 'results');
+% 
+% fprintf('✓ Results saved to: coupling_responsive_vs_nonresponsive_results.mat\n');
 fprintf('\n=== ANALYSIS COMPLETE ===\n');

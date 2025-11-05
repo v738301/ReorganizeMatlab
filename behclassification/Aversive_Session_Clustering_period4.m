@@ -1,13 +1,13 @@
 %% ========================================================================
-%  AVERSIVE SESSION CLUSTERING: Behavioral Profiles Across Time
+%  AVERSIVE SESSION CLUSTERING: Behavioral Profiles - Periods 3 & 4
 %  ========================================================================
 %
-%  Goal: Identify distinct behavioral response profiles to aversive noise
-%  Method: Cluster sessions based on 28-dimensional behavioral percentage features
-%          (7 behaviors × 4 periods)
+%  Goal: Identify distinct behavioral response profiles during Periods 3-4
+%  Method: Cluster sessions based on 14-dimensional behavioral percentage features
+%          (7 behaviors × 2 periods - Periods 3 and 4)
 %
 %  Analysis reveals whether different animals show distinct behavioral
-%  strategies in response to aversive stimuli
+%  strategies in response to aversive stimuli during the later periods
 %
 %% ========================================================================
 
@@ -18,17 +18,18 @@ close all
 %  SECTION 1: CONFIGURATION
 %  ========================================================================
 
-fprintf('=== AVERSIVE SESSION CLUSTERING ANALYSIS ===\n');
-fprintf('Behavioral Profiles: 7 Behaviors × 4 Periods\n\n');
+fprintf('=== AVERSIVE SESSION CLUSTERING ANALYSIS - PERIODS 3 & 4 ===\n');
+fprintf('Behavioral Profiles: 7 Behaviors × 2 Periods (P3, P4)\n\n');
 
 config = struct();
 config.behavior_names = {'Reward', 'Walking', 'Rearing', 'Scanning/Air-Sniff', ...
                          'Ground-Sniff', 'Grooming', 'Standing/Immobility'};
 config.behavior_names_short = {'Rew', 'Wlk', 'Rer', 'Scn', 'Snf', 'Grm', 'Std'};
 config.n_behaviors = 7;
-config.n_periods = 4;
+config.n_periods = 2;  % CHANGED: Periods 3 and 4
+config.target_periods = [3, 4];  % NEW: Specify which periods to use
 config.confidence_threshold = 0.3;
-config.n_features = config.n_behaviors * config.n_periods;  % 28 features
+config.n_features = config.n_behaviors * config.n_periods;  % 14 features
 
 %% ========================================================================
 %  SECTION 2: LOAD AVERSIVE DATA
@@ -48,13 +49,13 @@ catch ME
 end
 
 %% ========================================================================
-%  SECTION 3: EXTRACT BEHAVIORAL PERCENTAGES (P1-P4)
+%  SECTION 3: EXTRACT BEHAVIORAL PERCENTAGES (P3 & P4)
 %  ========================================================================
 
-fprintf('Extracting behavioral percentage features...\n');
+fprintf('Extracting behavioral percentage features for Periods 3 & 4...\n');
 
 % Initialize storage
-feature_matrix = [];  % Will be N_sessions × 28
+feature_matrix = [];  % Will be N_sessions × 14
 session_info = struct('session_id', {}, 'animal_id', {}, 'valid', {});
 
 n_valid_sessions = 0;
@@ -86,16 +87,17 @@ for sess_idx = 1:length(sessions_aversive)
     prediction_ind = prediction_ind + 10;
     prediction_time = session.TriggerMid(prediction_ind);
 
-    % Define period boundaries (P1-P4)
+    % Define all period boundaries
     period_boundaries = [session.TriggerMid(1), ...
                          aversive_times(1:3)' + session.TriggerMid(1), ...
                          aversive_times(4) + session.TriggerMid(1)];
 
-    % Initialize feature vector for this session
+    % Initialize feature vector for this session (14 features: 7 for P3, 7 for P4)
     session_features = zeros(1, config.n_features);
 
-    % Process each period
-    for period = 1:config.n_periods
+    % Process Periods 3 and 4
+    for period_idx = 1:config.n_periods
+        period = config.target_periods(period_idx);  % Get actual period number (3 or 4)
         period_start = period_boundaries(period);
         period_end = period_boundaries(period + 1);
 
@@ -124,8 +126,8 @@ for sess_idx = 1:length(sessions_aversive)
                 count = sum(valid_dominant == beh);
                 percentage = (count / total_valid) * 100;
 
-                % Feature index: (period-1)*7 + beh
-                feature_idx = (period - 1) * config.n_behaviors + beh;
+                % Feature index: (period_idx-1)*7 + beh
+                feature_idx = (period_idx - 1) * config.n_behaviors + beh;
                 session_features(feature_idx) = percentage;
             end
         end
@@ -141,7 +143,7 @@ for sess_idx = 1:length(sessions_aversive)
 end
 
 fprintf('✓ Feature matrix: %d sessions × %d features\n', size(feature_matrix, 1), size(feature_matrix, 2));
-fprintf('  Feature structure: [Beh1-7 P1, Beh1-7 P2, Beh1-7 P3, Beh1-7 P4]\n\n');
+fprintf('  Feature structure: [Beh1-7 P3, Beh1-7 P4]\n\n');
 
 n_sessions = size(feature_matrix, 1);
 
@@ -248,7 +250,7 @@ catch
     axis off;
 end
 
-sgtitle('Cluster Optimization Metrics', 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle('Cluster Optimization Metrics (Periods 3 & 4)', 'FontSize', 14, 'FontWeight', 'bold');
 
 %% ========================================================================
 %  SECTION 6: PERFORM CLUSTERING
@@ -276,7 +278,7 @@ fprintf('Silhouette range: [%.3f, %.3f]\n\n', min(silhouette_vals), max(silhouet
 %  SECTION 7: CHARACTERIZE CLUSTERS
 %  ========================================================================
 
-fprintf('=== CLUSTER CHARACTERISTICS ===\n\n');
+fprintf('=== CLUSTER CHARACTERISTICS (Periods 3 & 4) ===\n\n');
 
 cluster_profiles = struct();
 cluster_colors = lines(optimal_k);
@@ -299,10 +301,10 @@ for cluster = 1:optimal_k
     cluster_features = feature_matrix(cluster_mask, :);
 
     % Compute median and std for each behavior × period
-    cluster_median = median(cluster_features, 1);  % 1×28
+    cluster_median = median(cluster_features, 1);  % 1×14
     cluster_std = std(cluster_features, 0, 1);
 
-    % Reshape to [7 behaviors × 4 periods]
+    % Reshape to [7 behaviors × 2 periods]
     cluster_median_matrix = reshape(cluster_median, config.n_behaviors, config.n_periods);
     cluster_std_matrix = reshape(cluster_std, config.n_behaviors, config.n_periods);
 
@@ -316,8 +318,9 @@ for cluster = 1:optimal_k
 
     % Print top 3 behaviors by percentage in each period
     fprintf('  Behavioral profile:\n');
-    for period = 1:config.n_periods
-        [sorted_pct, sorted_idx] = sort(cluster_median_matrix(:, period), 'descend');
+    for period_idx = 1:config.n_periods
+        period = config.target_periods(period_idx);
+        [sorted_pct, sorted_idx] = sort(cluster_median_matrix(:, period_idx), 'descend');
         fprintf('    P%d: ', period);
         for i = 1:3
             fprintf('%s (%.1f%%), ', config.behavior_names{sorted_idx(i)}, sorted_pct(i));
@@ -347,7 +350,7 @@ for cluster = 1:optimal_k
 end
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 11);
 ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 11);
-title('PCA: Sessions Colored by Cluster', 'FontSize', 12, 'FontWeight', 'bold');
+title('PCA: Sessions Colored by Cluster (P3 & P4)', 'FontSize', 12, 'FontWeight', 'bold');
 legend('Location', 'best', 'FontSize', 10);
 grid on;
 axis equal;
@@ -364,28 +367,28 @@ end
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 11);
 ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 11);
 zlabel(sprintf('PC3 (%.1f%%)', explained(3)), 'FontSize', 11);
-title('PCA 3D: Sessions Colored by Cluster', 'FontSize', 12, 'FontWeight', 'bold');
+title('PCA 3D: Sessions Colored by Cluster (P3 & P4)', 'FontSize', 12, 'FontWeight', 'bold');
 legend('Location', 'best', 'FontSize', 10);
 grid on;
 view(45, 30);
 
-sgtitle(sprintf('Aversive Session Clustering (k=%d)', optimal_k), 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle(sprintf('Aversive Session Clustering - Periods 3 & 4 (k=%d)', optimal_k), 'FontSize', 14, 'FontWeight', 'bold');
 
 %% ========================================================================
 %  SECTION 9: VISUALIZATION - Behavioral Trajectories by Cluster
 %  ========================================================================
 
-% FIGURE 3: Cluster profiles - behavioral trajectories
+% FIGURE 3: Cluster profiles - behavioral trajectories across P3 & P4
 fig_profiles = figure('Position', [50, 50, 1800, 1000]);
 ax = [];
 for beh = 1:config.n_behaviors
     ax(end+1) = subplot(3, 3, beh);
     hold on;
 
-    % Plot each cluster's trajectory for this behavior
+    % Plot each cluster's trajectory for this behavior (P3 → P4)
     for cluster = 1:optimal_k
-        profile = cluster_profiles(cluster).median(beh, :);  % 1×4
-        plot(1:4, profile, 'o-', 'LineWidth', 2.5, 'MarkerSize', 8, ...
+        profile = cluster_profiles(cluster).median(beh, :);  % 1×2 (P3, P4)
+        plot(config.target_periods, profile, 'o-', 'LineWidth', 2.5, 'MarkerSize', 10, ...
              'Color', cluster_profiles(cluster).color, ...
              'MarkerFaceColor', cluster_profiles(cluster).color, ...
              'DisplayName', sprintf('Cluster %d (n=%d)', cluster, cluster_profiles(cluster).n_sessions));
@@ -394,8 +397,9 @@ for beh = 1:config.n_behaviors
     title(config.behavior_names{beh}, 'FontSize', 12, 'FontWeight', 'bold');
     xlabel('Period', 'FontSize', 11);
     ylabel('Percentage (%)', 'FontSize', 11);
-    xticks(1:4);
-    xticklabels({'P1', 'P2', 'P3', 'P4'});
+    xticks(config.target_periods);
+    xticklabels({'P3', 'P4'});
+    xlim([2.5, 4.5]);
     grid on;
 
     if beh == 1
@@ -403,14 +407,48 @@ for beh = 1:config.n_behaviors
     end
     hold off;
 end
-linkaxes([ax],'xy')
-sgtitle(sprintf('Behavioral Profiles by Cluster (k=%d)', optimal_k), 'FontSize', 15, 'FontWeight', 'bold');
+linkaxes([ax],'y')
+sgtitle(sprintf('Behavioral Trajectories by Cluster: P3 → P4 (k=%d)', optimal_k), 'FontSize', 15, 'FontWeight', 'bold');
 
 %% ========================================================================
-%  SECTION 10: VISUALIZATION - Heatmaps for Each Cluster
+%  SECTION 10: VISUALIZATION - Grouped Bar Plots by Cluster
 %  ========================================================================
 
-% FIGURE 4: Heatmaps
+% FIGURE 4: Grouped bar plots showing P3 vs P4 for each cluster
+fig_bars = figure('Position', [50, 50, 1400, 600]);
+
+for cluster = 1:optimal_k
+    subplot(1, optimal_k, cluster);
+    
+    % Data: 7 behaviors × 2 periods
+    bar_data = cluster_profiles(cluster).median;  % 7×2
+    
+    b = bar(bar_data);
+    b(1).FaceColor = [0.8 0.8 1.0];  % Light blue for P3
+    b(2).FaceColor = cluster_profiles(cluster).color;  % Cluster color for P4
+    
+    title(sprintf('Cluster %d (n=%d)', cluster, cluster_profiles(cluster).n_sessions), ...
+          'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Percentage (%)', 'FontSize', 11);
+    xlabel('Behavior', 'FontSize', 11);
+    xticks(1:config.n_behaviors);
+    xticklabels(config.behavior_names_short);
+    xtickangle(45);
+    ylim([0, max(feature_matrix(:)) * 1.1]);
+    grid on;
+    
+    if cluster == 1
+        legend({'P3', 'P4'}, 'Location', 'best', 'FontSize', 10);
+    end
+end
+
+sgtitle('Behavioral Profiles by Cluster: P3 vs P4', 'FontSize', 14, 'FontWeight', 'bold');
+
+%% ========================================================================
+%  SECTION 11: VISUALIZATION - Heatmaps for Each Cluster
+%  ========================================================================
+
+% FIGURE 5: Heatmaps
 % fig_heatmaps = figure('Position', [100, 100, 400*optimal_k, 500]);
 % 
 % for cluster = 1:optimal_k
@@ -428,29 +466,30 @@ sgtitle(sprintf('Behavioral Profiles by Cluster (k=%d)', optimal_k), 'FontSize',
 %     xticks(1:config.n_behaviors);
 %     xticklabels(config.behavior_names_short);
 %     xtickangle(45);
-%     yticks(1:4);
-%     yticklabels({'P1', 'P2', 'P3', 'P4'});
+%     yticks(1:2);
+%     yticklabels({'P3', 'P4'});
 %     set(gca, 'FontSize', 10);
 % end
 % 
-% sgtitle('Behavioral Percentage Heatmaps by Cluster', 'FontSize', 14, 'FontWeight', 'bold');
+% sgtitle('Behavioral Percentage Heatmaps by Cluster (P3 & P4)', 'FontSize', 14, 'FontWeight', 'bold');
 
 %% ========================================================================
-%  SECTION 11: VISUALIZATION - Silhouette Plot
+%  SECTION 12: VISUALIZATION - Silhouette Plot
 %  ========================================================================
 
-% FIGURE 5: Silhouette plot
-fig_silhouette = figure('Position', [100, 100, 800, 600]); hold on
+% FIGURE 6: Silhouette plot
+fig_silhouette = figure('Position', [100, 100, 800, 600]); 
+hold on
 [silh_vals, h] = silhouette(feature_matrix_z, cluster_idx, 'sqeuclidean');
-xline(mean(silh_vals))
+xline(mean(silh_vals), 'r--', 'LineWidth', 2);
 
-title(sprintf('Silhouette Plot (k=%d, mean=%.3f)', optimal_k, mean(silh_vals)), ...
+title(sprintf('Silhouette Plot - Periods 3 & 4 (k=%d, mean=%.3f)', optimal_k, mean(silh_vals)), ...
       'FontSize', 13, 'FontWeight', 'bold');
 xlabel('Silhouette Value', 'FontSize', 11);
 ylabel('Cluster', 'FontSize', 11);
 
 %% ========================================================================
-%  SECTION 12: STATISTICAL COMPARISON BETWEEN CLUSTERS
+%  SECTION 13: STATISTICAL COMPARISON BETWEEN CLUSTERS
 %  ========================================================================
 
 fprintf('\n=== STATISTICAL COMPARISON BETWEEN CLUSTERS ===\n\n');
@@ -458,14 +497,15 @@ fprintf('\n=== STATISTICAL COMPARISON BETWEEN CLUSTERS ===\n\n');
 p_values = nan(config.n_behaviors, config.n_periods);
 
 for beh = 1:config.n_behaviors
-    for period = 1:config.n_periods
+    for period_idx = 1:config.n_periods
+        period = config.target_periods(period_idx);
 
-        feature_idx = (period - 1) * config.n_behaviors + beh;
+        feature_idx = (period_idx - 1) * config.n_behaviors + beh;
         feature_values = feature_matrix(:, feature_idx);
 
         % Kruskal-Wallis test (non-parametric ANOVA for multiple groups)
         [p_val, tbl, stats] = kruskalwallis(feature_values, cluster_idx, 'off');
-        p_values(beh, period) = p_val;
+        p_values(beh, period_idx) = p_val;
 
         if p_val < 0.05
             fprintf('%s P%d: Significant difference between clusters (p=%.4f) ***\n', ...
@@ -491,7 +531,7 @@ end
 fprintf('\n');
 
 %% ========================================================================
-%  SECTION 13: CLUSTER COMPOSITION ANALYSIS
+%  SECTION 14: CLUSTER COMPOSITION ANALYSIS
 %  ========================================================================
 
 fprintf('=== CLUSTER COMPOSITION BY ANIMAL ===\n\n');
@@ -528,6 +568,4 @@ for i = 1:n_animals
 end
 
 fprintf('\n');
-
-%%
-clustering_result = [1,1,2,1,1,1,2,2,1,2,1,2,2,2,2,2,2,2,2,2,2,2,2,2];
+fprintf('=== CLUSTERING COMPLETE ===\n');
