@@ -37,12 +37,17 @@ config.feature_to_sort = [];  % Used if sort_method = 'feature'
 config.show_dendrogram = true;  % Show hierarchical clustering dendrogram
 config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
+config.exclude_categories = {};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
 fprintf('  Sort method: %s\n', config.sort_method);
 fprintf('  Normalize features: %d\n', config.normalize_features);
-fprintf('  Colormap: %s\n\n', config.colormap_name);
+fprintf('  Colormap: %s\n', config.colormap_name);
+if ~isempty(config.exclude_categories)
+    fprintf('  Exclude categories: %s\n', strjoin(config.exclude_categories, ', '));
+end
+fprintf('\n');
 
 %% ========================================================================
 %  SECTION 2: LOAD DATA
@@ -228,7 +233,36 @@ end
 fprintf('\n✓ Feature matrix built: %d units × %d features\n\n', size(all_features, 1), size(all_features, 2));
 
 %% ========================================================================
-%  SECTION 4: NORMALIZE FEATURES (OPTIONAL)
+%  SECTION 4: FILTER FEATURE CATEGORIES (OPTIONAL)
+%% ========================================================================
+
+if ~isempty(config.exclude_categories)
+    fprintf('Filtering feature categories...\n');
+    fprintf('  Excluding: %s\n', strjoin(config.exclude_categories, ', '));
+
+    % Find features to keep (not in excluded categories)
+    features_to_keep = true(size(feature_categories));
+    for i = 1:length(feature_categories)
+        if any(strcmp(feature_categories{i}, config.exclude_categories))
+            features_to_keep(i) = false;
+        end
+    end
+
+    n_excluded = sum(~features_to_keep);
+    fprintf('  Removing %d features from excluded categories\n', n_excluded);
+
+    % Filter the feature matrix and metadata
+    all_features = all_features(:, features_to_keep);
+    feature_names = feature_names(features_to_keep);
+    feature_categories = feature_categories(features_to_keep);
+
+    fprintf('✓ Filtered to %d features\n\n', size(all_features, 2));
+else
+    fprintf('No feature categories excluded\n\n');
+end
+
+%% ========================================================================
+%  SECTION 5: NORMALIZE FEATURES (OPTIONAL)
 %% ========================================================================
 
 if config.normalize_features
@@ -254,7 +288,7 @@ else
 end
 
 %% ========================================================================
-%  SECTION 5: DETERMINE SORTING ORDER (UNITS AND/OR FEATURES)
+%  SECTION 6: DETERMINE SORTING ORDER (UNITS AND/OR FEATURES)
 %% ========================================================================
 
 fprintf('Determining sorting order...\n');
@@ -380,7 +414,7 @@ end
 fprintf('✓ Sorting order determined\n\n');
 
 %% ========================================================================
-%  SECTION 6: CREATE COMPREHENSIVE HEATMAP
+%  SECTION 7: CREATE COMPREHENSIVE HEATMAP
 %% ========================================================================
 
 fprintf('Creating comprehensive heatmap...\n');
@@ -572,22 +606,22 @@ xlim([-2,2])
 ylim([-2,2])
 
 %% ========================================================================
-%  SECTION 7: SAVE RESULTS
+%  SECTION 8: SAVE RESULTS
 %% ========================================================================
 
 % fprintf('Saving results...\n');
-% 
+%
 % % Save figure
 % saveas(fig, sprintf('Unit_Features_Comprehensive_Heatmap_%s.png', config.sort_method));
 % fprintf('✓ Saved figure\n');
-% 
+%
 % % Save feature matrix and metadata
 % save('unit_features_matrix.mat', 'feature_matrix', 'all_features', 'feature_names', ...
 %      'feature_categories', 'sort_idx', 'session_types', 'is_aversive', '-v7.3');
 % fprintf('✓ Saved feature matrix to: unit_features_matrix.mat\n');
 
 %% ========================================================================
-%  SECTION 8: SUMMARY STATISTICS
+%  SECTION 9: SUMMARY STATISTICS
 %% ========================================================================
 
 fprintf('\n=== FEATURE MATRIX SUMMARY ===\n');
