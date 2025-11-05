@@ -299,9 +299,28 @@ fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
 fprintf('  Sort method: %s\n', config.sort_method);
 fprintf('  Separate by session: %d\n', config.separate_by_session);
 
-% Get session types for all units
+% Get session types and session IDs for all units
 session_types = {coherence_features.session_type};
 is_aversive = contains(session_types, 'Aversive');
+
+% Extract session IDs - check which field is available
+if isfield(coherence_features, 'session_id')
+    session_ids = {coherence_features.session_id};
+elseif isfield(coherence_features, 'unit_id')
+    % Extract session ID from unit_id (format might be 'SessionID_UnitID')
+    unit_ids = {coherence_features.unit_id};
+    session_ids = cellfun(@(x) extractBefore(x, '_'), unit_ids, 'UniformOutput', false);
+    % If no underscore, use the whole unit_id
+    for i = 1:length(session_ids)
+        if isempty(session_ids{i})
+            session_ids{i} = unit_ids{i};
+        end
+    end
+else
+    % If no session ID field, create generic IDs based on session type
+    warning('No session_id or unit_id field found, using generic session IDs');
+    session_ids = arrayfun(@(x) sprintf('Session%03d', x), 1:length(session_types), 'UniformOutput', false);
+end
 
 % If analyzing separately, we'll need to store results for each session type
 if config.separate_by_session
@@ -766,9 +785,11 @@ else
 
             simple_matrix_plot = simplified_matrix_norm(sess_units, :);
             simple_is_aversive = is_aversive(sess_units);
+            simple_session_ids = session_ids(sess_units);
         else
             simple_matrix_plot = simplified_matrix_norm;
             simple_is_aversive = is_aversive;
+            simple_session_ids = session_ids;
         end
 
         % Perform hierarchical clustering on simplified matrix
@@ -871,7 +892,7 @@ else
 
             fprintf('  ✓ Simplified heatmap created\n');
 
-            % --- CLUSTER THRESHOLDING AND SESSION COMPOSITION ANALYSIS ---
+            % --- CLUSTER THRESHOLDING AND SESSION ID COMPOSITION ANALYSIS ---
             fprintf('  Performing cluster thresholding...\n');
 
             % Determine number of clusters using distance threshold
@@ -891,89 +912,122 @@ else
             n_clusters = max(cluster_assignments_clean);
             fprintf('    Found %d clusters\n', n_clusters);
 
-            % Analyze session composition of each cluster
+            % Get unique session IDs
+            unique_sessions = unique(simple_session_ids);
+            n_sessions = length(unique_sessions);
+            fprintf('    Analyzing %d unique sessions\n', n_sessions);
+
+            % Analyze session ID composition of each cluster
             cluster_stats = struct();
+            session_cluster_matrix = zeros(n_sessions, n_clusters);  % rows=sessions, cols=clusters
+
             for c = 1:n_clusters
                 units_in_cluster = find(cluster_assignments == c);
                 n_units_in_cluster = length(units_in_cluster);
-
-                if config.separate_by_session
-                    % For separate analysis, all units are same session type
-                    if strcmp(simple_plot_names{plot_idx}, 'Aversive')
-                        n_aversive = n_units_in_cluster;
-                        n_reward = 0;
-                    else
-                        n_aversive = 0;
-                        n_reward = n_units_in_cluster;
-                    end
-                else
-                    % For combined analysis, count session types
-                    aversive_in_cluster = simple_is_aversive(units_in_cluster);
-                    n_aversive = sum(aversive_in_cluster);
-                    n_reward = sum(~aversive_in_cluster);
-                end
+                session_ids_in_cluster = simple_session_ids(units_in_cluster);
 
                 cluster_stats(c).cluster_id = c;
                 cluster_stats(c).n_total = n_units_in_cluster;
-                cluster_stats(c).n_aversive = n_aversive;
-                cluster_stats(c).n_reward = n_reward;
-                cluster_stats(c).pct_aversive = 100 * n_aversive / n_units_in_cluster;
-                cluster_stats(c).pct_reward = 100 * n_reward / n_units_in_cluster;
+                cluster_stats(c).session_composition = struct();
 
-                fprintf('    Cluster %d: %d units (%d aversive, %d reward)\n', ...
-                    c, n_units_in_cluster, n_aversive, n_reward);
+                fprintf('    Cluster %d: %d units\n', c, n_units_in_cluster);
+
+                % Count units from each session
+                for s = 1:n_sessions
+                    sess_id = unique_sessions{s};
+                    n_from_session = sum(strcmp(session_ids_in_cluster, sess_id));
+                    session_cluster_matrix(s, c) = n_from_session;
+
+                    if n_from_session > 0
+                        cluster_stats(c).session_composition(s).session_id = sess_id;
+                        cluster_stats(c).session_composition(s).n_units = n_from_session;
+                        cluster_stats(c).session_composition(s).pct = 100 * n_from_session / n_units_in_cluster;
+                        fprintf('      %s: %d units (%.1f%%)\n', sess_id, n_from_session, ...
+                            100 * n_from_session / n_units_in_cluster);
+                    end
+                end
             end
 
-            % --- CREATE SESSION COMPOSITION FIGURE ---
-            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1200 600], ...
-                                    'Name', sprintf('Cluster Session Composition - %s', simple_plot_names{plot_idx}));
+            % --- CREATE SESSION ID COMPOSITION FIGURE ---
+            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1400 800], ...
+                                    'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
 
-            % Left subplot: Stacked bar chart
+            % Left subplot: Heatmap showing session contribution to each cluster
             subplot(1, 2, 1);
-            cluster_ids = [cluster_stats.cluster_id];
-            aversive_counts = [cluster_stats.n_aversive];
-            reward_counts = [cluster_stats.n_reward];
+            imagesc(session_cluster_matrix');  % Transpose so clusters are on X, sessions on Y
+            colormap(hot);
+            colorbar;
 
-            bar_data = [aversive_counts; reward_counts]';
-            bar_handle = bar(cluster_ids, bar_data, 'stacked');
-            bar_handle(1).FaceColor = [0.8 0.2 0.2];  % Red for aversive
-            bar_handle(2).FaceColor = [0.2 0.2 0.8];  % Blue for reward
+            % Labels
+            xlabel('Session ID', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Units per Session per Cluster', 'FontSize', 13, 'FontWeight', 'bold');
 
-            xlabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Number of Units', 'FontSize', 12, 'FontWeight', 'bold');
-            title('Session Composition by Cluster', 'FontSize', 13, 'FontWeight', 'bold');
-            legend({'Aversive', 'Reward'}, 'Location', 'best');
-            grid on;
-            set(gca, 'FontSize', 11);
+            % X-axis: Session IDs
+            set(gca, 'XTick', 1:n_sessions);
+            set(gca, 'XTickLabel', unique_sessions);
+            set(gca, 'XTickLabelRotation', 45);
 
-            % Right subplot: Percentage stacked bar chart
+            % Y-axis: Cluster IDs
+            set(gca, 'YTick', 1:n_clusters);
+            set(gca, 'YTickLabel', 1:n_clusters);
+
+            set(gca, 'FontSize', 10);
+            axis tight;
+
+            % Add text annotations showing counts
+            for s = 1:n_sessions
+                for c = 1:n_clusters
+                    count = session_cluster_matrix(s, c);
+                    if count > 0
+                        text(s, c, num2str(count), 'HorizontalAlignment', 'center', ...
+                            'Color', 'white', 'FontSize', 9, 'FontWeight', 'bold');
+                    end
+                end
+            end
+
+            % Right subplot: Bar chart showing total units per session across all clusters
             subplot(1, 2, 2);
-            pct_aversive = [cluster_stats.pct_aversive];
-            pct_reward = [cluster_stats.pct_reward];
+            units_per_session = sum(session_cluster_matrix, 2);
 
-            bar_data_pct = [pct_aversive; pct_reward]';
-            bar_handle_pct = bar(cluster_ids, bar_data_pct, 'stacked');
-            bar_handle_pct(1).FaceColor = [0.8 0.2 0.2];  % Red for aversive
-            bar_handle_pct(2).FaceColor = [0.2 0.2 0.8];  % Blue for reward
+            % Color bars by session type (if available)
+            bar_colors = zeros(n_sessions, 3);
+            for s = 1:n_sessions
+                % Find first unit from this session to get its type
+                sess_id = unique_sessions{s};
+                unit_idx = find(strcmp(simple_session_ids, sess_id), 1);
+                if ~isempty(unit_idx) && simple_is_aversive(unit_idx)
+                    bar_colors(s, :) = [0.8 0.2 0.2];  % Red for aversive
+                else
+                    bar_colors(s, :) = [0.2 0.2 0.8];  % Blue for reward
+                end
+            end
 
-            xlabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Percentage (%)', 'FontSize', 12, 'FontWeight', 'bold');
-            title('Session Composition (Percentage)', 'FontSize', 13, 'FontWeight', 'bold');
-            legend({'Aversive', 'Reward'}, 'Location', 'best');
-            ylim([0 100]);
+            bar_handle = bar(1:n_sessions, units_per_session, 'FaceColor', 'flat');
+            bar_handle.CData = bar_colors;
+
+            xlabel('Session ID', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Total Number of Units', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Units per Session (All Clusters)', 'FontSize', 13, 'FontWeight', 'bold');
+
+            set(gca, 'XTick', 1:n_sessions);
+            set(gca, 'XTickLabel', unique_sessions);
+            set(gca, 'XTickLabelRotation', 45);
+            set(gca, 'FontSize', 10);
             grid on;
-            set(gca, 'FontSize', 11);
 
             % Add overall title
             if config.separate_by_session
-                sgtitle(sprintf('Simplified Clustering - %s Sessions (%d clusters, threshold=%.2f)', ...
-                    simple_plot_names{plot_idx}, n_clusters, cluster_threshold), 'FontSize', 14, 'FontWeight', 'bold');
+                sgtitle(sprintf('Session ID Composition - %s Sessions (%d clusters, %d sessions, threshold=%.2f)', ...
+                    simple_plot_names{plot_idx}, n_clusters, n_sessions, cluster_threshold), ...
+                    'FontSize', 14, 'FontWeight', 'bold');
             else
-                sgtitle(sprintf('Simplified Clustering - All Sessions (%d clusters, threshold=%.2f)', ...
-                    n_clusters, cluster_threshold), 'FontSize', 14, 'FontWeight', 'bold');
+                sgtitle(sprintf('Session ID Composition - All Sessions (%d clusters, %d sessions, threshold=%.2f)', ...
+                    n_clusters, n_sessions, cluster_threshold), ...
+                    'FontSize', 14, 'FontWeight', 'bold');
             end
 
-            fprintf('  ✓ Cluster composition figure created\n');
+            fprintf('  ✓ Session ID composition figure created\n');
         else
             fprintf('  WARNING: Not enough valid units (%d) for simplified clustering\n', sum(valid_units));
         end
