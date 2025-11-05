@@ -39,6 +39,7 @@ config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
 config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 config.separate_by_session = true;  % Analyze reward and aversive sessions separately
+config.simplified_cluster_threshold = 2.0;  % Distance threshold for simplified clustering (lower = more clusters)
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
@@ -869,6 +870,110 @@ else
                 'HorizontalAlignment', 'center');
 
             fprintf('  ✓ Simplified heatmap created\n');
+
+            % --- CLUSTER THRESHOLDING AND SESSION COMPOSITION ANALYSIS ---
+            fprintf('  Performing cluster thresholding...\n');
+
+            % Determine number of clusters using distance threshold
+            % Adjust config.simplified_cluster_threshold to get different number of clusters
+            % Lower threshold = more clusters, Higher threshold = fewer clusters
+            cluster_threshold = config.simplified_cluster_threshold;
+            cluster_assignments_clean = cluster(simple_linkage_tree, 'cutoff', cluster_threshold, 'criterion', 'distance');
+
+            % Option 2: Manual - specify number of clusters (uncomment to use)
+            % n_clusters = 4;
+            % cluster_assignments_clean = cluster(simple_linkage_tree, 'maxclust', n_clusters);
+
+            % Map cluster assignments back to all units
+            cluster_assignments = nan(size(simple_matrix_plot, 1), 1);
+            cluster_assignments(valid_idx) = cluster_assignments_clean;
+
+            n_clusters = max(cluster_assignments_clean);
+            fprintf('    Found %d clusters\n', n_clusters);
+
+            % Analyze session composition of each cluster
+            cluster_stats = struct();
+            for c = 1:n_clusters
+                units_in_cluster = find(cluster_assignments == c);
+                n_units_in_cluster = length(units_in_cluster);
+
+                if config.separate_by_session
+                    % For separate analysis, all units are same session type
+                    if strcmp(simple_plot_names{plot_idx}, 'Aversive')
+                        n_aversive = n_units_in_cluster;
+                        n_reward = 0;
+                    else
+                        n_aversive = 0;
+                        n_reward = n_units_in_cluster;
+                    end
+                else
+                    % For combined analysis, count session types
+                    aversive_in_cluster = simple_is_aversive(units_in_cluster);
+                    n_aversive = sum(aversive_in_cluster);
+                    n_reward = sum(~aversive_in_cluster);
+                end
+
+                cluster_stats(c).cluster_id = c;
+                cluster_stats(c).n_total = n_units_in_cluster;
+                cluster_stats(c).n_aversive = n_aversive;
+                cluster_stats(c).n_reward = n_reward;
+                cluster_stats(c).pct_aversive = 100 * n_aversive / n_units_in_cluster;
+                cluster_stats(c).pct_reward = 100 * n_reward / n_units_in_cluster;
+
+                fprintf('    Cluster %d: %d units (%d aversive, %d reward)\n', ...
+                    c, n_units_in_cluster, n_aversive, n_reward);
+            end
+
+            % --- CREATE SESSION COMPOSITION FIGURE ---
+            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1200 600], ...
+                                    'Name', sprintf('Cluster Session Composition - %s', simple_plot_names{plot_idx}));
+
+            % Left subplot: Stacked bar chart
+            subplot(1, 2, 1);
+            cluster_ids = [cluster_stats.cluster_id];
+            aversive_counts = [cluster_stats.n_aversive];
+            reward_counts = [cluster_stats.n_reward];
+
+            bar_data = [aversive_counts; reward_counts]';
+            bar_handle = bar(cluster_ids, bar_data, 'stacked');
+            bar_handle(1).FaceColor = [0.8 0.2 0.2];  % Red for aversive
+            bar_handle(2).FaceColor = [0.2 0.2 0.8];  % Blue for reward
+
+            xlabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Number of Units', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Session Composition by Cluster', 'FontSize', 13, 'FontWeight', 'bold');
+            legend({'Aversive', 'Reward'}, 'Location', 'best');
+            grid on;
+            set(gca, 'FontSize', 11);
+
+            % Right subplot: Percentage stacked bar chart
+            subplot(1, 2, 2);
+            pct_aversive = [cluster_stats.pct_aversive];
+            pct_reward = [cluster_stats.pct_reward];
+
+            bar_data_pct = [pct_aversive; pct_reward]';
+            bar_handle_pct = bar(cluster_ids, bar_data_pct, 'stacked');
+            bar_handle_pct(1).FaceColor = [0.8 0.2 0.2];  % Red for aversive
+            bar_handle_pct(2).FaceColor = [0.2 0.2 0.8];  % Blue for reward
+
+            xlabel('Cluster ID', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Percentage (%)', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Session Composition (Percentage)', 'FontSize', 13, 'FontWeight', 'bold');
+            legend({'Aversive', 'Reward'}, 'Location', 'best');
+            ylim([0 100]);
+            grid on;
+            set(gca, 'FontSize', 11);
+
+            % Add overall title
+            if config.separate_by_session
+                sgtitle(sprintf('Simplified Clustering - %s Sessions (%d clusters, threshold=%.2f)', ...
+                    simple_plot_names{plot_idx}, n_clusters, cluster_threshold), 'FontSize', 14, 'FontWeight', 'bold');
+            else
+                sgtitle(sprintf('Simplified Clustering - All Sessions (%d clusters, threshold=%.2f)', ...
+                    n_clusters, cluster_threshold), 'FontSize', 14, 'FontWeight', 'bold');
+            end
+
+            fprintf('  ✓ Cluster composition figure created\n');
         else
             fprintf('  WARNING: Not enough valid units (%d) for simplified clustering\n', sum(valid_units));
         end
