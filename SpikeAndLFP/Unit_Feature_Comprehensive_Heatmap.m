@@ -39,7 +39,7 @@ config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
 config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 config.separate_by_session = true;  % Analyze reward and aversive sessions separately
-config.simplified_cluster_threshold = 2.0;  % Distance threshold for simplified clustering (lower = more clusters)
+config.simplified_cluster_threshold = 14.0;  % Distance threshold for simplified clustering (lower = more clusters)
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
@@ -817,6 +817,7 @@ else
             simple_linkage_tree = linkage(distances, 'ward');
 
             % Get dendrogram order
+            figure;
             [~, ~, sort_idx_clean] = dendrogram(simple_linkage_tree, 0);
 
             % Map back to original indices
@@ -956,11 +957,12 @@ else
                         cluster_stats(c).session_composition(s).session_id = sess_id;
                         cluster_stats(c).session_composition(s).n_units = n_from_session;
                         cluster_stats(c).session_composition(s).pct = 100 * n_from_session / n_units_in_cluster;
-                        fprintf('      %s: %d units (%.1f%%)\n', sess_id, n_from_session, ...
+                        fprintf('      %d: %d units (%.1f%%)\n', sess_id, n_from_session, ...
                             100 * n_from_session / n_units_in_cluster);
                     end
                 end
             end
+
 
             % --- CREATE SESSION ID COMPOSITION FIGURE ---
             % Create figure first to avoid overlap issues
@@ -968,34 +970,15 @@ else
                                     'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
 
             % --- LEFT: Colored Dendrogram sorted by Cluster ID ---
-            subplot('Position', [0.05 0.12 0.18 0.75]);
-
-            % To sort dendrogram by cluster ID, we need to reorder leaves
-            % Get the original dendrogram leaf order
-            [~, ~, leaf_order] = dendrogram(simple_linkage_tree, 0);
-
-            % Map leaf order to cluster assignments
-            cluster_for_leaves = cluster_assignments_clean(leaf_order);
-
-            % Sort by cluster ID to get the desired order
-            [~, sort_idx_within_dendrogram] = sort(cluster_for_leaves, 'ascend');
-
-            % Create the reordering permutation
-            leaf_order_sorted = leaf_order(sort_idx_within_dendrogram);
-
-            % Use optimalleaforder to optimize the ordering within clusters
-            try
-                D = pdist(simple_matrix_clean, 'euclidean');
-                leaforder = optimalleaforder(simple_linkage_tree, D);
-            catch
-                % If optimalleaforder fails, use simple sorted order
-                leaforder = leaf_order_sorted;
-            end
-
+            subplot('Position', [0.05 0.12 0.18 0.75]);            
+            
+            allUnitID = 1:length(cluster_assignments);
+            allUnitID(simple_sort_idx) = allUnitID;
+            [~,cluster_double_sort] = sortrows([cluster_assignments(:),allUnitID(:)],[1,2]);
             % Draw dendrogram with cluster coloring and reordering
             H = dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', ...
                           'ColorThreshold', cluster_threshold, ...
-                          'Reorder', leaforder);
+                          'Reorder', cluster_double_sort);
 
             set(gca, 'YDir', 'normal');  % Cluster 1 at bottom
             set(gca, 'XTickLabel', []);
@@ -1101,6 +1084,77 @@ else
                     n_clusters, n_sessions, cluster_threshold), ...
                     'FontSize', 14, 'FontWeight', 'bold');
             end
+
+            % Reorder matrix
+            simple_matrix_sorted = simple_matrix_plot(cluster_double_sort, valid_features);
+            simple_is_aversive_sorted = simple_is_aversive(cluster_double_sort);
+
+            % Create figure
+            fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
+                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
+
+            % Left: Dendrogram
+            subplot('Position', [0.05 0.15 0.10 0.75]);
+            dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', ...
+                          'ColorThreshold', cluster_threshold, ...
+                          'Reorder', cluster_double_sort);
+            set(gca, 'YDir', 'reverse');
+            set(gca, 'XTickLabel', []);
+            ylabel('Units');
+            title('Unit Clustering');
+
+            % Center: Heatmap
+            subplot('Position', [0.17 0.15 0.65 0.75]);
+            imagesc(simple_matrix_sorted);
+            axis tight;
+            colormap(bluewhitered(256));
+            caxis([-3 3]);
+
+            % Colorbar
+            cb = colorbar;
+            cb.Position = [0.84 0.15 0.02 0.75];
+            ylabel(cb, 'Z-score', 'FontSize', 11);
+
+            % Labels
+            xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+            ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
+
+            % X-axis: Feature names
+            set(gca, 'XTick', 1:length(simple_names_used));
+            set(gca, 'XTickLabel', simple_names_used);
+            set(gca, 'XTickLabelRotation', 45);
+            set(gca, 'FontSize', 11);
+
+            % Y-axis: Unit indices
+            set(gca, 'YTick', []);
+
+            % Add session type color bar on LEFT
+            subplot('Position', [0.15 0.15 0.01 0.75]);
+            session_type_colors = zeros(length(simple_sort_idx), 1, 3);
+            for i = 1:length(simple_sort_idx)
+                if simple_is_aversive_sorted(i)
+                    session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
+                else
+                    session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
+                end
+            end
+            image(session_type_colors);
+            set(gca, 'XTick', [], 'YTick', []);
+            xlabel('Session', 'FontSize', 9, 'Rotation', 0);
+
+            % Add title
+            if config.separate_by_session
+                title_str = sprintf('Simplified 5-Feature Clustering - %s Sessions (%d units)', ...
+                    simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
+            else
+                title_str = sprintf('Simplified 5-Feature Clustering (%d units)', ...
+                    size(simple_matrix_sorted, 1));
+            end
+            annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
+                'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+                'HorizontalAlignment', 'center');
+
+            fprintf('  ✓ Sorted heatmap created\n');
 
             fprintf('  ✓ Session ID composition figure created\n');
         else
