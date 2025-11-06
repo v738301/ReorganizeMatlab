@@ -489,30 +489,108 @@ else
 end
 
 %% ========================================================================
-%  SECTION 10: COMPUTE ADDITIONAL FIRING STATISTICS
+%  SECTION 10: COMPUTE ADDITIONAL FIRING STATISTICS (FR & CV)
 %  ========================================================================
 
-fprintf('\n=== COMPUTING FIRING STATISTICS ===\n');
+fprintf('\n=== COMPUTING FIRING STATISTICS (FR & CV) ===\n');
 
-% These are derived from coherence_features (which has n_spikes)
-% We'll compute basic stats here
+% Configuration
+min_spikes_for_CV = 10;  % Minimum spikes to calculate CV reliably
 
+% Load sorting parameters (needed for raw spike data loading)
+fprintf('Loading sorting parameters for spike data...\n');
+[T_sorted] = loadSortingParameters();
+
+% Load raw spike data for aversive sessions
+fprintf('Loading raw spike data for FR/CV calculation...\n');
+numofsession = 2;
+folderpath = "/Volumes/ExpansionBackup/Data/Struct_spike";
+
+% Process aversive sessions
+[aversive_files, ~, num_aversive] = selectFilesWithAnimalIDFiltering(folderpath, numofsession, '2025*RewardAversive*.mat');
+fprintf('  Found %d aversive session files\n', num_aversive);
+
+% Process reward sessions
+[reward_files, ~, num_reward] = selectFilesWithAnimalIDFiltering(folderpath, numofsession, '2025*RewardSeeking*.mat');
+fprintf('  Found %d reward session files\n', num_reward);
+
+% Combine all spike files
+all_spike_files = [aversive_files; reward_files];
+all_spike_sessions = cell(length(all_spike_files), 1);
+
+% Initialize FR/CV fields in coherence_features
 for i = 1:length(coherence_features)
-    % Already have n_spikes from coherence extraction
-    % For now, we'll compute basic metrics
-    % More detailed firing stats would require loading raw spike data
-
     coherence_features(i).n_spikes_total = coherence_features(i).n_spikes;
-
-    % Placeholder for more detailed stats (would need raw spike data)
-    % These would be filled in if we load raw spike trains
     coherence_features(i).firing_rate_mean = NaN;
     coherence_features(i).cv = NaN;
-    coherence_features(i).burst_index = NaN;
 end
 
-fprintf('✓ Basic firing statistics added\n');
-fprintf('  NOTE: Detailed FR/CV statistics require raw spike data\n');
+% Load and process each spike file
+fprintf('Processing spike files for FR/CV calculation...\n');
+for file_idx = 1:length(all_spike_files)
+    fprintf('[%d/%d] %s\n', file_idx, length(all_spike_files), all_spike_files(file_idx).name);
+
+    try
+        % Load spike data
+        Timelimits = 'No';
+        [~, ~, ~, ~, ~, ~, ~, ~, ~, ~, valid_spikes, ~, TriggerMid] = ...
+            loadAndPrepareSessionData(all_spike_files(file_idx), T_sorted, Timelimits);
+
+        % Calculate session duration
+        session_start = TriggerMid(1);
+        session_end = TriggerMid(end);
+        session_duration = session_end - session_start;
+
+        % Store session info
+        all_spike_sessions{file_idx} = struct();
+        all_spike_sessions{file_idx}.filename = all_spike_files(file_idx).name;
+        all_spike_sessions{file_idx}.n_units = length(valid_spikes);
+        all_spike_sessions{file_idx}.duration = session_duration;
+
+        % Find matching coherence features for this session
+        spike_basename = extractBefore(all_spike_files(file_idx).name, '.mat');
+
+        for coh_idx = 1:length(coherence_features)
+            % Match by filename
+            if contains(coherence_features(coh_idx).session_filename, spike_basename)
+                unit_id = coherence_features(coh_idx).unit_id;
+
+                % Check if unit exists in spike data
+                if unit_id <= length(valid_spikes)
+                    spike_times = valid_spikes{unit_id};
+
+                    if ~isempty(spike_times)
+                        % Calculate firing rate (Hz)
+                        n_spikes = length(spike_times);
+                        firing_rate = n_spikes / session_duration;
+                        coherence_features(coh_idx).firing_rate_mean = firing_rate;
+
+                        % Calculate CV from inter-spike intervals
+                        if n_spikes >= min_spikes_for_CV
+                            ISI = diff(spike_times);
+                            if ~isempty(ISI) && mean(ISI) > 0
+                                CV = std(ISI) / mean(ISI);
+                                coherence_features(coh_idx).cv = CV;
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+    catch ME
+        fprintf('  Warning: Failed to process %s: %s\n', all_spike_files(file_idx).name, ME.message);
+        continue;
+    end
+end
+
+% Count how many units have FR/CV computed
+n_with_FR = sum(~isnan([coherence_features.firing_rate_mean]));
+n_with_CV = sum(~isnan([coherence_features.cv]));
+
+fprintf('✓ FR/CV statistics computed\n');
+fprintf('  Units with firing rate: %d/%d\n', n_with_FR, length(coherence_features));
+fprintf('  Units with CV: %d/%d\n', n_with_CV, length(coherence_features));
 
 %% ========================================================================
 %  SECTION 11: SAVE EXTRACTED FEATURES
@@ -550,6 +628,8 @@ fprintf('  Coherence: %d units\n', length(coherence_features));
 fprintf('    - Narrow bands (1-3, 5-7, 8-10 Hz)\n');
 fprintf('    - Broad bands (Delta, Theta, Beta, Gammas)\n');
 fprintf('    - Peak coherence frequency & magnitude\n');
+fprintf('    - Firing rate (Hz)\n');
+fprintf('    - Coefficient of variation (CV)\n');
 fprintf('\n');
 fprintf('  Phase Coupling (Narrow): %d units\n', length(phase_narrow_features));
 fprintf('    - MRL for 3 narrow bands × 7 behaviors\n');
@@ -566,6 +646,8 @@ fprintf('    - Mean Z-score [0-1 sec] per event\n');
 fprintf('    - Peak Z-score per event\n');
 fprintf('    - Response type (excite/inhibit/none)\n');
 fprintf('    - Number of events\n');
+fprintf('\n');
+fprintf('  Firing Statistics: %d units with FR, %d units with CV\n', n_with_FR, n_with_CV);
 fprintf('\n');
 fprintf('Next step: Run Unit_Feature_Visualization.m\n');
 fprintf('========================================\n');
