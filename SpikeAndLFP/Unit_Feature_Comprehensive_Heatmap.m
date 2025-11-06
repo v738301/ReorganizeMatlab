@@ -912,6 +912,18 @@ else
             n_clusters = max(cluster_assignments_clean);
             fprintf('    Found %d clusters\n', n_clusters);
 
+            % Sort units by cluster ID for clean visualization
+            [cluster_assignments_sorted, cluster_sort_idx] = sort(cluster_assignments, 'ascend', 'MissingPlacement', 'last');
+
+            % Remove NaN entries (units that weren't clustered)
+            valid_cluster_idx = ~isnan(cluster_assignments_sorted);
+            cluster_sort_idx = cluster_sort_idx(valid_cluster_idx);
+            cluster_assignments_sorted = cluster_assignments_sorted(valid_cluster_idx);
+
+            % Reorder the matrix and session IDs by cluster
+            simple_matrix_sorted_by_cluster = simple_matrix_plot(cluster_sort_idx, :);
+            simple_session_ids_sorted = simple_session_ids(cluster_sort_idx);
+
             % Get unique session IDs
             unique_sessions = unique(simple_session_ids);
             n_sessions = length(unique_sessions);
@@ -922,9 +934,9 @@ else
             session_cluster_matrix = zeros(n_sessions, n_clusters);  % rows=sessions, cols=clusters
 
             for c = 1:n_clusters
-                units_in_cluster = find(cluster_assignments == c);
+                units_in_cluster = find(cluster_assignments_sorted == c);
                 n_units_in_cluster = length(units_in_cluster);
-                session_ids_in_cluster = simple_session_ids(units_in_cluster);
+                session_ids_in_cluster = simple_session_ids_sorted(units_in_cluster);
 
                 cluster_stats(c).cluster_id = c;
                 cluster_stats(c).n_total = n_units_in_cluster;
@@ -953,22 +965,50 @@ else
             fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1600 800], ...
                                     'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
 
-            % --- LEFT: Colored Dendrogram ---
+            % --- LEFT: Cluster Block Visualization (sorted by cluster ID) ---
             subplot('Position', [0.05 0.12 0.18 0.75]);
 
-            % Create dendrogram with cluster coloring
-            dendrogram_handles = dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', 'ColorThreshold', cluster_threshold);
-            set(gca, 'YDir', 'reverse');
-            set(gca, 'XTickLabel', []);
-            ylabel('Units', 'FontSize', 11, 'FontWeight', 'bold');
-            title('Dendrogram', 'FontSize', 12, 'FontWeight', 'bold');
-            set(gca, 'FontSize', 10);
+            % Create cluster colors
+            cluster_colors = lines(n_clusters);
 
-            % Add cluster threshold line
+            % Find cluster boundaries
+            cluster_boundaries = [];
+            cluster_centers = [];
+            for c = 1:n_clusters
+                cluster_start = find(cluster_assignments_sorted == c, 1, 'first');
+                cluster_end = find(cluster_assignments_sorted == c, 1, 'last');
+                cluster_boundaries = [cluster_boundaries; cluster_start, cluster_end];
+                cluster_centers(c) = (cluster_start + cluster_end) / 2;
+            end
+
+            % Draw colored blocks for each cluster
             hold on;
-            xlims = xlim;
-            plot([cluster_threshold, cluster_threshold], ylim, 'r--', 'LineWidth', 2);
+            for c = 1:n_clusters
+                y_start = cluster_boundaries(c, 1);
+                y_end = cluster_boundaries(c, 2);
+                y_height = y_end - y_start + 1;
+
+                % Draw filled rectangle
+                rectangle('Position', [0, y_start-0.5, 1, y_height], ...
+                         'FaceColor', cluster_colors(c, :), ...
+                         'EdgeColor', 'k', 'LineWidth', 1.5);
+
+                % Add cluster ID label
+                text(0.5, cluster_centers(c), sprintf('C%d', c), ...
+                    'HorizontalAlignment', 'center', ...
+                    'FontSize', 11, 'FontWeight', 'bold', 'Color', 'white');
+            end
             hold off;
+
+            % Format axes
+            xlim([0 1]);
+            ylim([0.5 length(cluster_assignments_sorted)+0.5]);
+            set(gca, 'YDir', 'normal');  % Normal direction: Cluster 1 at bottom
+            set(gca, 'XTick', []);
+            ylabel('Units (sorted by Cluster ID)', 'FontSize', 11, 'FontWeight', 'bold');
+            title('Cluster Membership', 'FontSize', 12, 'FontWeight', 'bold');
+            set(gca, 'FontSize', 10);
+            box on;
 
             % --- CENTER: Heatmap showing session contribution to each cluster ---
             subplot('Position', [0.28 0.12 0.35 0.75]);
@@ -989,9 +1029,10 @@ else
             set(gca, 'XTickLabel', unique_sessions);
             set(gca, 'XTickLabelRotation', 45);
 
-            % Y-axis: Cluster IDs
+            % Y-axis: Cluster IDs (reversed so Cluster 1 is at bottom)
             set(gca, 'YTick', 1:n_clusters);
             set(gca, 'YTickLabel', 1:n_clusters);
+            set(gca, 'YDir', 'normal');  % Normal direction: Cluster 1 at bottom
 
             set(gca, 'FontSize', 10);
             axis tight;
