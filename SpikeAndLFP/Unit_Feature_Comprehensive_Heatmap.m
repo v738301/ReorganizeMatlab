@@ -965,49 +965,47 @@ else
             fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1600 800], ...
                                     'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
 
-            % --- LEFT: Cluster Block Visualization (sorted by cluster ID) ---
+            % --- LEFT: Colored Dendrogram sorted by Cluster ID ---
             subplot('Position', [0.05 0.12 0.18 0.75]);
 
-            % Create cluster colors
-            cluster_colors = lines(n_clusters);
+            % To sort dendrogram by cluster ID, we need to reorder leaves
+            % Get the original dendrogram leaf order
+            [~, ~, leaf_order] = dendrogram(simple_linkage_tree, 0);
 
-            % Find cluster boundaries
-            cluster_boundaries = [];
-            cluster_centers = [];
-            for c = 1:n_clusters
-                cluster_start = find(cluster_assignments_sorted == c, 1, 'first');
-                cluster_end = find(cluster_assignments_sorted == c, 1, 'last');
-                cluster_boundaries = [cluster_boundaries; cluster_start, cluster_end];
-                cluster_centers(c) = (cluster_start + cluster_end) / 2;
+            % Map leaf order to cluster assignments
+            cluster_for_leaves = cluster_assignments_clean(leaf_order);
+
+            % Sort by cluster ID to get the desired order
+            [~, sort_idx_within_dendrogram] = sort(cluster_for_leaves, 'ascend');
+
+            % Create the reordering permutation
+            leaf_order_sorted = leaf_order(sort_idx_within_dendrogram);
+
+            % Use optimalleaforder to optimize the ordering within clusters
+            try
+                D = pdist(simple_matrix_clean, 'euclidean');
+                leaforder = optimalleaforder(simple_linkage_tree, D);
+            catch
+                % If optimalleaforder fails, use simple sorted order
+                leaforder = leaf_order_sorted;
             end
 
-            % Draw colored blocks for each cluster
-            hold on;
-            for c = 1:n_clusters
-                y_start = cluster_boundaries(c, 1);
-                y_end = cluster_boundaries(c, 2);
-                y_height = y_end - y_start + 1;
+            % Draw dendrogram with cluster coloring and reordering
+            H = dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', ...
+                          'ColorThreshold', cluster_threshold, ...
+                          'Reorder', leaforder);
 
-                % Draw filled rectangle
-                rectangle('Position', [0, y_start-0.5, 1, y_height], ...
-                         'FaceColor', cluster_colors(c, :), ...
-                         'EdgeColor', 'k', 'LineWidth', 1.5);
-
-                % Add cluster ID label
-                text(0.5, cluster_centers(c), sprintf('C%d', c), ...
-                    'HorizontalAlignment', 'center', ...
-                    'FontSize', 11, 'FontWeight', 'bold', 'Color', 'white');
-            end
-            hold off;
-
-            % Format axes
-            xlim([0 1]);
-            ylim([0.5 length(cluster_assignments_sorted)+0.5]);
-            set(gca, 'YDir', 'normal');  % Normal direction: Cluster 1 at bottom
-            set(gca, 'XTick', []);
+            set(gca, 'YDir', 'normal');  % Cluster 1 at bottom
+            set(gca, 'XTickLabel', []);
             ylabel('Units (sorted by Cluster ID)', 'FontSize', 11, 'FontWeight', 'bold');
-            title('Cluster Membership', 'FontSize', 12, 'FontWeight', 'bold');
+            title('Dendrogram', 'FontSize', 12, 'FontWeight', 'bold');
             set(gca, 'FontSize', 10);
+
+            % Add cluster threshold line
+            hold on;
+            ylims = ylim;
+            plot([cluster_threshold, cluster_threshold], ylims, 'r--', 'LineWidth', 2);
+            hold off;
             box on;
 
             % --- CENTER: Heatmap showing session contribution to each cluster ---
