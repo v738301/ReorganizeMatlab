@@ -202,17 +202,19 @@ all_features(:, end+1) = [coherence_features.coherence_peak_mag]';
 feature_names{end+1} = 'Coh_PeakMag';
 feature_categories{end+1} = 'Coherence';
 
-% Firing rate and CV (2 features)
+% Firing rate (1 feature)
 all_features(:, end+1) = [coherence_features.firing_rate_mean]';
 feature_names{end+1} = 'FiringRate';
-feature_categories{end+1} = 'FiringStats';
+feature_categories{end+1} = 'FiringRate';
 
+% Coefficient of Variation (1 feature)
 all_features(:, end+1) = [coherence_features.cv]';
 feature_names{end+1} = 'CV';
-feature_categories{end+1} = 'FiringStats';
+feature_categories{end+1} = 'CV';
 
 fprintf('    Added %d coherence features\n', 11);
-fprintf('    Added %d firing statistics features\n', 2);
+fprintf('    Added 1 firing rate feature\n');
+fprintf('    Added 1 CV feature\n');
 
 % ----- PHASE COUPLING FEATURES (NARROW BANDS) -----
 fprintf('  Adding narrow-band phase coupling features...\n');
@@ -794,20 +796,19 @@ fprintf('✓ Heatmap(s) created\n\n');
 
 
 %% ========================================================================
-%  SIMPLIFIED 7-FEATURE CLUSTERING ANALYSIS
+%  SIMPLIFIED 6-FEATURE CLUSTERING ANALYSIS
 %% ========================================================================
 
-fprintf('\n=== SIMPLIFIED 7-FEATURE CLUSTERING ===\n\n');
+fprintf('\n=== SIMPLIFIED 6-FEATURE CLUSTERING ===\n\n');
 
-% Define the 7 key features for simplified clustering
+% Define the 6 key features for simplified clustering
 simplified_feature_names = {
     'Coh_5-7Hz',           % Coherence 5-7Hz
     'Coh_8-10Hz',          % Coherence 8-10Hz
     'PSTH_WP1_MeanZ',      % PSTH WP1 mean z-score
     'PSTH_WP2_MeanZ',      % PSTH WP2 mean z-score
     'PSTH_Aversive_MeanZ', % PSTH Aversive mean z-score
-    'FiringRate',          % Mean firing rate (Hz)
-    'CV'                   % Coefficient of variation
+    'FiringRate'           % Mean firing rate (Hz)
 };
 
 % Extract these features from the full feature matrix
@@ -912,7 +913,7 @@ else
 
             % Create figure
             fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
-                               'Name', sprintf('Simplified 7-Feature Clustering - %s', simple_plot_names{plot_idx}));
+                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
 
             % Left: Dendrogram
             subplot('Position', [0.05 0.15 0.10 0.75]);
@@ -963,10 +964,10 @@ else
 
             % Add title
             if config.separate_by_session
-                title_str = sprintf('Simplified 7-Feature Clustering - %s Sessions (%d units)', ...
+                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
                     simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
             else
-                title_str = sprintf('Simplified 7-Feature Clustering (%d units)', ...
+                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
                     size(simple_matrix_sorted, 1));
             end
             annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
@@ -1173,7 +1174,7 @@ else
 
             % Create figure
             fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
-                               'Name', sprintf('Simplified 7-Feature Clustering - %s', simple_plot_names{plot_idx}));
+                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
 
             % Left: Dendrogram
             subplot('Position', [0.05 0.15 0.10 0.75]);
@@ -1226,10 +1227,10 @@ else
 
             % Add title
             if config.separate_by_session
-                title_str = sprintf('Simplified 7-Feature Clustering - %s Sessions (%d units)', ...
+                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
                     simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
             else
-                title_str = sprintf('Simplified 7-Feature Clustering (%d units)', ...
+                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
                     size(simple_matrix_sorted, 1));
             end
             annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
