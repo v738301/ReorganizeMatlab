@@ -39,7 +39,7 @@ config.normalize_features = true;  % Z-score normalize each feature column
 config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
 config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 config.separate_by_session = true;  % Analyze reward and aversive sessions separately
-config.simplified_cluster_threshold = 14.0;  % Distance threshold for simplified clustering (lower = more clusters)
+config.simplified_cluster_threshold = 9;  % Distance threshold for simplified clustering (lower = more clusters)
 config.exclude_sessions = [3,4,17,18,35,36];  % Session IDs to exclude from analysis, e.g., {'SessionA001', 'SessionR005'}
 
 fprintf('Configuration:\n');
@@ -801,12 +801,10 @@ fprintf('✓ Heatmap(s) created\n\n');
 
 fprintf('\n=== SIMPLIFIED 6-FEATURE CLUSTERING ===\n\n');
 
-% Define the 6 key features for simplified clustering
 simplified_feature_names = {
     'Coh_5-7Hz',           % Coherence 5-7Hz
     'Coh_8-10Hz',          % Coherence 8-10Hz
-    'PSTH_WP1_MeanZ',      % PSTH WP1 mean z-score
-    'PSTH_WP2_MeanZ',      % PSTH WP2 mean z-score
+    'PSTH_Reward_MeanZ',   % PSTH PSTH Reward Mean Z-score
     'PSTH_Aversive_MeanZ', % PSTH Aversive mean z-score
     'FiringRate'           % Mean firing rate (Hz)
 };
