@@ -1238,6 +1238,122 @@ else
             fprintf('  ✓ Sorted heatmap created\n');
 
             fprintf('  ✓ Session ID composition figure created\n');
+
+            % ========== SAVE ALL RESULTS FOR LATER USE ==========
+            fprintf('  Saving clustering results for later analysis...\n');
+
+            simplified_clustering_results = struct();
+
+            % 1. CLUSTERING DATA (for both figures)
+            simplified_clustering_results.clustering = struct();
+            simplified_clustering_results.clustering.linkage_tree = simple_linkage_tree;
+            simplified_clustering_results.clustering.cluster_threshold = cluster_threshold;
+            simplified_clustering_results.clustering.cluster_assignments = cluster_assignments;
+            simplified_clustering_results.clustering.n_clusters = n_clusters;
+            simplified_clustering_results.clustering.cluster_double_sort = cluster_double_sort;
+            simplified_clustering_results.clustering.simple_sort_idx = simple_sort_idx;
+            simplified_clustering_results.clustering.valid_units = valid_units;
+            simplified_clustering_results.clustering.distances = distances;
+
+            % 2. FEATURE MATRIX DATA (for heatmap figure)
+            simplified_clustering_results.features = struct();
+            simplified_clustering_results.features.matrix = simple_matrix_plot;
+            simplified_clustering_results.features.matrix_sorted = simple_matrix_sorted;
+            simplified_clustering_results.features.names = simple_names_used;
+            simplified_clustering_results.features.valid_features = valid_features;
+            simplified_clustering_results.features.simplified_indices = simplified_indices;
+
+            % 3. UNIT METADATA (for both figures)
+            simplified_clustering_results.units = [];
+            for u = 1:length(cluster_assignments)
+                if ~isnan(cluster_assignments(u))
+                    unit_info = struct();
+                    unit_info.global_unit_id = u;
+                    unit_info.session_id = simple_session_ids{u};
+                    unit_info.is_aversive = simple_is_aversive(u);
+                    unit_info.cluster_id = cluster_assignments(u);
+                    unit_info.features = simple_matrix_plot(u, valid_features);
+                    unit_info.session_filename = coherence_features(u).session_filename;
+                    unit_info.unit_id = coherence_features(u).unit_id;
+                    unit_info.session_type = coherence_features(u).session_type;
+                    simplified_clustering_results.units = [simplified_clustering_results.units; unit_info];
+                end
+            end
+
+            % 4. SESSION COMPOSITION DATA (for session composition figure)
+            simplified_clustering_results.session_composition = struct();
+            simplified_clustering_results.session_composition.session_cluster_matrix = session_cluster_matrix;
+            simplified_clustering_results.session_composition.unique_sessions = unique_sessions;
+            simplified_clustering_results.session_composition.n_sessions = n_sessions;
+            simplified_clustering_results.session_composition.cluster_stats = cluster_stats;
+            simplified_clustering_results.session_composition.units_per_session = sum(session_cluster_matrix, 2);
+
+            % 5. VISUALIZATION DATA (for both figures)
+            simplified_clustering_results.visualization = struct();
+            simplified_clustering_results.visualization.is_aversive_sorted = simple_is_aversive_sorted;
+            simplified_clustering_results.visualization.simple_session_ids = simple_session_ids;
+            simplified_clustering_results.visualization.simple_is_aversive = simple_is_aversive;
+
+            % 6. CONFIGURATION & METADATA
+            simplified_clustering_results.metadata = struct();
+            simplified_clustering_results.metadata.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
+            simplified_clustering_results.metadata.feature_names = simple_names_used;
+            simplified_clustering_results.metadata.n_features = length(simple_names_used);
+            simplified_clustering_results.metadata.config = config;
+            if config.separate_by_session
+                simplified_clustering_results.metadata.session_type = simple_plot_names{plot_idx};
+            else
+                simplified_clustering_results.metadata.session_type = 'combined';
+            end
+
+            % 7. RAW DATA PATHS (for interaction analysis later)
+            simplified_clustering_results.data_paths = struct();
+            simplified_clustering_results.data_paths.feature_file = 'unit_features_comprehensive.mat';
+            simplified_clustering_results.data_paths.spike_data_folder = '/Volumes/ExpansionBackup/Data/Struct_spike';
+
+            % 8. CLUSTER-TO-UNIT LOOKUP (for interaction analysis)
+            simplified_clustering_results.cluster_lookup = [];
+            for c = 1:n_clusters
+                cluster_info = struct();
+                unit_indices = find(cluster_assignments == c);
+                cluster_info.cluster_id = c;
+                cluster_info.unit_indices = unit_indices;
+                cluster_info.n_units = length(unit_indices);
+
+                % Store session and unit IDs for each unit in this cluster
+                cluster_unit_details = [];
+                for i = 1:length(unit_indices)
+                    u_idx = unit_indices(i);
+                    unit_detail = struct();
+                    unit_detail.global_unit_id = u_idx;
+                    unit_detail.session_id = simple_session_ids{u_idx};
+                    unit_detail.session_filename = coherence_features(u_idx).session_filename;
+                    unit_detail.unit_id = coherence_features(u_idx).unit_id;
+                    unit_detail.session_type = coherence_features(u_idx).session_type;
+                    cluster_unit_details = [cluster_unit_details; unit_detail];
+                end
+                cluster_info.unit_details = cluster_unit_details;
+
+                % Add cluster centroid (mean feature values)
+                cluster_features = simple_matrix_plot(unit_indices, valid_features);
+                cluster_info.centroid = mean(cluster_features, 1, 'omitnan');
+
+                simplified_clustering_results.cluster_lookup = [simplified_clustering_results.cluster_lookup; cluster_info];
+            end
+
+            % Save to file
+            timestamp_file = datestr(now, 'yyyy-mm-dd_HHMMSS');
+            if config.separate_by_session
+                save_filename = sprintf('simplified_clustering_%s_%s.mat', ...
+                    simple_plot_names{plot_idx}, timestamp_file);
+            else
+                save_filename = sprintf('simplified_clustering_combined_%s.mat', timestamp_file);
+            end
+
+            save(save_filename, 'simplified_clustering_results', '-v7.3');
+            fprintf('  ✓ Clustering results saved to: %s\n', save_filename);
+            fprintf('     - Contains all data to regenerate figures and analyze cluster interactions\n');
+
         else
             fprintf('  WARNING: Not enough valid units (%d) for simplified clustering\n', sum(valid_units));
         end
