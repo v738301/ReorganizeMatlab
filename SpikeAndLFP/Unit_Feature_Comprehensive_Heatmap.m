@@ -925,6 +925,7 @@ else
             simple_session_ids_sorted = simple_session_ids(cluster_sort_idx);
 
             % Get unique session IDs
+            simple_session_ids = [simple_session_ids{:}];
             unique_sessions = unique(simple_session_ids);
             n_sessions = length(unique_sessions);
             fprintf('    Analyzing %d unique sessions\n', n_sessions);
@@ -937,6 +938,7 @@ else
                 units_in_cluster = find(cluster_assignments_sorted == c);
                 n_units_in_cluster = length(units_in_cluster);
                 session_ids_in_cluster = simple_session_ids_sorted(units_in_cluster);
+                session_ids_in_cluster = [session_ids_in_cluster{:}];
 
                 cluster_stats(c).cluster_id = c;
                 cluster_stats(c).n_total = n_units_in_cluster;
@@ -946,8 +948,8 @@ else
 
                 % Count units from each session
                 for s = 1:n_sessions
-                    sess_id = unique_sessions{s};
-                    n_from_session = sum(strcmp(session_ids_in_cluster, sess_id));
+                    sess_id = unique_sessions(s);
+                    n_from_session = sum(ismember(session_ids_in_cluster, sess_id));
                     session_cluster_matrix(s, c) = n_from_session;
 
                     if n_from_session > 0
@@ -1062,8 +1064,8 @@ else
             bar_colors = zeros(n_sessions, 3);
             for s = 1:n_sessions
                 % Find first unit from this session to get its type
-                sess_id = unique_sessions{s};
-                unit_idx = find(strcmp(simple_session_ids, sess_id), 1);
+                sess_id = unique_sessions(s);
+                unit_idx = find(ismember(simple_session_ids, sess_id), 1);
                 if ~isempty(unit_idx) && simple_is_aversive(unit_idx)
                     bar_colors(s, :) = [0.8 0.2 0.2];  % Red for aversive
                 else
