@@ -40,6 +40,7 @@ config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redb
 config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 config.separate_by_session = true;  % Analyze reward and aversive sessions separately
 config.simplified_cluster_threshold = 14.0;  % Distance threshold for simplified clustering (lower = more clusters)
+config.exclude_sessions = {};  % Session IDs to exclude from analysis, e.g., {'SessionA001', 'SessionR005'}
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
@@ -49,6 +50,9 @@ fprintf('  Normalize features: %d\n', config.normalize_features);
 fprintf('  Colormap: %s\n', config.colormap_name);
 if ~isempty(config.exclude_categories)
     fprintf('  Exclude categories: %s\n', strjoin(config.exclude_categories, ', '));
+end
+if ~isempty(config.exclude_sessions)
+    fprintf('  Exclude sessions: %s\n', strjoin(config.exclude_sessions, ', '));
 end
 fprintf('\n');
 
@@ -87,6 +91,72 @@ fprintf('  PSTH: %d units\n\n', n_units_psth);
 
 % Use coherence features as the base (most complete)
 n_units = n_units_coherence;
+
+%% ========================================================================
+%  SECTION 2.5: FILTER SESSIONS (OPTIONAL)
+%% ========================================================================
+
+if ~isempty(config.exclude_sessions)
+    fprintf('Filtering sessions...\n');
+
+    % Extract session IDs from unit metadata
+    if isfield(coherence_features, 'session_id')
+        unit_session_ids = {coherence_features.session_id};
+    elseif isfield(coherence_features, 'unit_id')
+        % Extract session ID from unit_id (format might be 'SessionID_UnitID')
+        unit_ids = {coherence_features.unit_id};
+        unit_session_ids = cellfun(@(x) extractBefore(x, '_'), unit_ids, 'UniformOutput', false);
+        % If no underscore, use the whole unit_id
+        for i = 1:length(unit_session_ids)
+            if isempty(unit_session_ids{i})
+                unit_session_ids{i} = unit_ids{i};
+            end
+        end
+    else
+        warning('No session_id or unit_id field found, cannot filter sessions');
+        unit_session_ids = cell(1, n_units);
+    end
+
+    % Find units to keep (not in excluded sessions)
+    units_to_keep = true(1, n_units);
+    for i = 1:n_units
+        if any(strcmp(unit_session_ids{i}, config.exclude_sessions))
+            units_to_keep(i) = false;
+        end
+    end
+
+    n_excluded = sum(~units_to_keep);
+    fprintf('  Excluding %d units from %d session(s)\n', n_excluded, length(config.exclude_sessions));
+
+    % Filter all feature structures
+    coherence_features = coherence_features(units_to_keep);
+
+    % Filter phase features if they have the same length
+    if n_units_phase_narrow == n_units
+        phase_narrow_features = phase_narrow_features(units_to_keep);
+    end
+    if n_units_phase_broad == n_units
+        phase_broad_features = phase_broad_features(units_to_keep);
+    end
+    if n_units_psth == n_units
+        psth_features = psth_features(units_to_keep);
+    end
+
+    % Update counts
+    n_units_coherence = length(coherence_features);
+    n_units_phase_narrow = length(phase_narrow_features);
+    n_units_phase_broad = length(phase_broad_features);
+    n_units_psth = length(psth_features);
+    n_units = n_units_coherence;
+
+    fprintf('  Remaining units:\n');
+    fprintf('    Coherence: %d units\n', n_units_coherence);
+    fprintf('    Phase narrow: %d units\n', n_units_phase_narrow);
+    fprintf('    Phase broad: %d units\n', n_units_phase_broad);
+    fprintf('    PSTH: %d units\n\n', n_units_psth);
+else
+    fprintf('No sessions excluded\n\n');
+end
 
 %% ========================================================================
 %  SECTION 3: BUILD COMPREHENSIVE FEATURE MATRIX
