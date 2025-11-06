@@ -21,7 +21,7 @@
 %% ========================================================================
 
 clear all;
-% close all;
+close all;
 
 %% ========================================================================
 %  SECTION 1: CONFIGURATION
@@ -40,7 +40,7 @@ config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redb
 config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
 config.separate_by_session = true;  % Analyze reward and aversive sessions separately
 config.simplified_cluster_threshold = 14.0;  % Distance threshold for simplified clustering (lower = more clusters)
-config.exclude_sessions = {};  % Session IDs to exclude from analysis, e.g., {'SessionA001', 'SessionR005'}
+config.exclude_sessions = [3,4,17,18,35,36];  % Session IDs to exclude from analysis, e.g., {'SessionA001', 'SessionR005'}
 
 fprintf('Configuration:\n');
 fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
@@ -52,7 +52,7 @@ if ~isempty(config.exclude_categories)
     fprintf('  Exclude categories: %s\n', strjoin(config.exclude_categories, ', '));
 end
 if ~isempty(config.exclude_sessions)
-    fprintf('  Exclude sessions: %s\n', strjoin(config.exclude_sessions, ', '));
+    fprintf('  Exclude sessions: %d\n', config.exclude_sessions);
 end
 fprintf('\n');
 
@@ -120,7 +120,7 @@ if ~isempty(config.exclude_sessions)
     % Find units to keep (not in excluded sessions)
     units_to_keep = true(1, n_units);
     for i = 1:n_units
-        if any(strcmp(unit_session_ids{i}, config.exclude_sessions))
+        if any(ismember(unit_session_ids{i}, config.exclude_sessions))
             units_to_keep(i) = false;
         end
     end
