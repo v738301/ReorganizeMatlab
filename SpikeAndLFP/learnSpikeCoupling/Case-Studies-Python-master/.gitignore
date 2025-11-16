@@ -1,0 +1,16 @@
+.DS_Store
+*checkpoint.ipynb
+*checkpoint.md
+*None*.png
+*.m
+*.m~
+*Solutions*
+*/*.icloud
+*/*.pyc
+*__pycache__*
+*_ignore*
+local/
+_site/
+Case*pdf
+_build
+*.swp

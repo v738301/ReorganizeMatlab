@@ -1269,7 +1269,7 @@ else
                 if ~isnan(cluster_assignments(u))
                     unit_info = struct();
                     unit_info.global_unit_id = u;
-                    unit_info.session_id = simple_session_ids{u};
+                    unit_info.session_id = simple_session_ids(u);
                     unit_info.is_aversive = simple_is_aversive(u);
                     unit_info.cluster_id = cluster_assignments(u);
                     unit_info.features = simple_matrix_plot(u, valid_features);
@@ -1326,7 +1326,7 @@ else
                     u_idx = unit_indices(i);
                     unit_detail = struct();
                     unit_detail.global_unit_id = u_idx;
-                    unit_detail.session_id = simple_session_ids{u_idx};
+                    unit_detail.session_id = simple_session_ids(u_idx);
                     unit_detail.session_filename = coherence_features(u_idx).session_filename;
                     unit_detail.unit_id = coherence_features(u_idx).unit_id;
                     unit_detail.session_type = coherence_features(u_idx).session_type;
