@@ -7,7 +7,7 @@
 %  SessionType: Aversive vs Reward
 %  Aversive Periods: P1-P7 (6 aversive noises create 7 periods)
 %  Reward Periods: P1-P4 (time-matched to aversive)
-%  Frequency Bands: Delta, Theta, Beta, Low_Gamma, High_Gamma, Ultra_Gamma
+%  Frequency Bands: 1 Hz bins from 0.1 to 150 Hz (150 bands)
 %
 %  PPC (Pairwise Phase Consistency) advantages:
 %  - Unbiased by spike count (unlike MRL)
@@ -25,46 +25,60 @@ close all
 %  ========================================================================
 
 fprintf('=== UNIT PPC ANALYSIS: AVERSIVE vs REWARD ===\n');
-fprintf('Pairwise Phase Consistency for Spike-LFP Coupling\n\n');
+fprintf('Pairwise Phase Consistency for Spike-LFP Coupling\n');
+fprintf('1 Hz frequency bins from 0.1 to 150 Hz\n\n');
 
 config = struct();
 
-% Frequency bands to analyze
-config.frequency_bands = {
-    'Delta',      [1, 4];
-    'Theta',      [5, 12];
-    'Beta',       [15, 30];
-    'Low_Gamma',  [30, 60];
-    'High_Gamma', [80, 100];
-    'Ultra_Gamma',[100, 150];
-};
+% Generate frequency bands: 1 Hz bins from 0.1 to 150 Hz
+freq_start = 0.1:1:149;
+freq_end = 1:1:150;
+n_bands = length(freq_start);
+
+config.frequency_bands = cell(n_bands, 2);
+for i = 1:n_bands
+    config.frequency_bands{i, 1} = sprintf('%.1f-%.1fHz', freq_start(i), freq_end(i));
+    config.frequency_bands{i, 2} = [freq_start(i), freq_end(i)];
+end
 
 % LFP filtering parameters
-config.bp_range = [1 300];  % Bandpass filter range for raw signal
+config.bp_range = [0.1 300];  % Bandpass filter range for raw signal
 
 % Statistical parameters
 config.min_spikes = 10;          % Minimum spikes to calculate PPC
-config.bootstrap_samples = 500;  % Bootstrap iterations for CI
-config.ci_level = 0.95;          % 95% confidence intervals
+config.bootstrap_samples = 0;    % Set to 0 to skip bootstrap (faster), >0 for CI
+config.ci_level = 0.95;          % 95% confidence intervals (if bootstrap enabled)
 
 % Data paths
 config.spike_folder = '/Volumes/ExpansionBackUp/Data/Struct_spike';
 config.numofsession = 999;  % Max sessions per animal
+
+% Create save directories
+DataSetsPath = '/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/SpikeAndLFP/DataSet';
+RewardSeekingPath = fullfile(DataSetsPath, 'RewardSeeking_UnitPPC');
+RewardAversivePath = fullfile(DataSetsPath, 'RewardAversive_UnitPPC');
+if ~exist(RewardSeekingPath, 'dir')
+    mkdir(RewardSeekingPath);
+end
+if ~exist(RewardAversivePath, 'dir')
+    mkdir(RewardAversivePath);
+end
 
 % Add paths
 addpath('/Users/hsiehkunlin/Desktop/Matlab_scripts/SpikePipeline/BreathingLFPSpikeToolbox/');
 addpath('/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/behclassification/NewScripts/');
 
 fprintf('Configuration:\n');
-fprintf('  Frequency bands: %d\n', size(config.frequency_bands, 1));
-for i = 1:size(config.frequency_bands, 1)
-    fprintf('    %d. %s: %.1f-%.1f Hz\n', i, config.frequency_bands{i,1}, ...
-        config.frequency_bands{i,2}(1), config.frequency_bands{i,2}(2));
-end
+fprintf('  Frequency bands: %d (1 Hz bins)\n', n_bands);
+fprintf('  Range: %.1f - %.1f Hz\n', freq_start(1), freq_end(end));
 fprintf('  Aversive periods: 7 (based on 6 noise events)\n');
 fprintf('  Reward periods: 4 (time-matched)\n');
 fprintf('  Min spikes for PPC: %d\n', config.min_spikes);
-fprintf('  Bootstrap samples: %d\n\n', config.bootstrap_samples);
+if config.bootstrap_samples > 0
+    fprintf('  Bootstrap samples: %d (CI enabled)\n\n', config.bootstrap_samples);
+else
+    fprintf('  Bootstrap: DISABLED (faster computation)\n\n');
+end
 
 %% ========================================================================
 %  SECTION 2: LOAD SORTING PARAMETERS
@@ -96,25 +110,7 @@ fprintf('✓ Found %d reward sessions\n\n', num_reward_sessions);
 
 fprintf('==== PROCESSING AVERSIVE SESSIONS ====\n');
 
-% Initialize storage
-aversive_data = struct();
-aversive_data.session_id = [];
-aversive_data.unit_id = [];
-aversive_data.period = [];
-aversive_data.band_name = {};
-aversive_data.session_name = {};
-aversive_data.period_duration = [];
-
-% PPC metrics
-aversive_data.PPC = [];
-aversive_data.preferred_phase = [];
-aversive_data.PPC_CI_lower = [];
-aversive_data.PPC_CI_upper = [];
-aversive_data.n_spikes = [];
-aversive_data.reliability = {};
-
 n_valid_aversive = 0;
-n_bands = size(config.frequency_bands, 1);
 
 for sess_idx = 1:num_aversive_sessions
     fprintf('\n[%d/%d] Processing: %s\n', sess_idx, num_aversive_sessions, allfiles_aversive(sess_idx).name);
@@ -150,18 +146,53 @@ for sess_idx = 1:num_aversive_sessions
     n_periods = 7;
     n_units = length(valid_spikes);
 
-    fprintf('  LFP channel: %d, Units: %d, Periods: %d\n', bestChannel, n_units, n_periods);
+    fprintf('  LFP channel: %d, Units: %d, Periods: %d, Fs: %.0f Hz\n', bestChannel, n_units, n_periods, Fs);
+
+    % Initialize session results storage
+    session_results = struct();
+    session_results.session_id = n_valid_aversive;
+    session_results.filename = spike_filename;
+    session_results.session_type = 'RewardAversive';
+    session_results.best_channel = bestChannel;
+    session_results.Fs = Fs;
+    session_results.n_units = n_units;
+    session_results.n_periods = n_periods;
+    session_results.period_boundaries = period_boundaries;
+
+    % Initialize data storage for this session
+    session_data = struct();
+    session_data.unit_id = [];
+    session_data.period = [];
+    session_data.band_name = {};
+    session_data.freq_low = [];
+    session_data.freq_high = [];
+    session_data.period_duration = [];
+    session_data.PPC = [];
+    session_data.preferred_phase = [];
+    session_data.PPC_CI_lower = [];
+    session_data.PPC_CI_upper = [];
+    session_data.n_spikes = [];
+    session_data.reliability = {};
 
     % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands...\n', n_bands);
+    fprintf('  Computing phase signals for %d frequency bands (0.1-150 Hz)...\n', n_bands);
     phase_signals = cell(n_bands, 1);
 
     for band_idx = 1:n_bands
         band_range = config.frequency_bands{band_idx, 2};
-        LFP_filtered = bandpass(LFP, band_range, Fs, 'ImpulseResponse', 'iir', 'Steepness', 0.95);
+
+        % Use robust filtering for low frequencies
+        LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
+
+        % Hilbert transform to get instantaneous phase
         analytic_signal = hilbert(LFP_filtered);
         phase_signals{band_idx} = angle(analytic_signal);  % Phase in radians [-π, π]
+
+        if mod(band_idx, 30) == 0
+            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        end
     end
+    fprintf('  ✓ All phase signals computed\n');
 
     % Process each unit
     for unit_idx = 1:n_units
@@ -194,6 +225,7 @@ for sess_idx = 1:num_aversive_sessions
             % Process each frequency band
             for band_idx = 1:n_bands
                 band_name = config.frequency_bands{band_idx, 1};
+                band_range = config.frequency_bands{band_idx, 2};
 
                 % Extract spike phases for this band
                 spike_phases = phase_signals{band_idx}(spike_indices);
@@ -205,50 +237,52 @@ for sess_idx = 1:num_aversive_sessions
                 % Determine reliability based on spike count
                 reliability = determine_reliability(n_spikes);
 
-                % Store data
-                aversive_data.session_id(end+1) = n_valid_aversive;
-                aversive_data.unit_id(end+1) = (n_valid_aversive - 1) * 1000 + unit_idx;
-                aversive_data.period(end+1) = period_idx;
-                aversive_data.band_name{end+1} = band_name;
-                aversive_data.session_name{end+1} = spike_filename;
-                aversive_data.period_duration(end+1) = period_duration;
-                aversive_data.PPC(end+1) = PPC;
-                aversive_data.preferred_phase(end+1) = preferred_phase;
-                aversive_data.PPC_CI_lower(end+1) = PPC_CI_lower;
-                aversive_data.PPC_CI_upper(end+1) = PPC_CI_upper;
-                aversive_data.n_spikes(end+1) = n_spikes;
-                aversive_data.reliability{end+1} = reliability;
+                % Store data in session_data
+                session_data.unit_id(end+1) = unit_idx;
+                session_data.period(end+1) = period_idx;
+                session_data.band_name{end+1} = band_name;
+                session_data.freq_low(end+1) = band_range(1);
+                session_data.freq_high(end+1) = band_range(2);
+                session_data.period_duration(end+1) = period_duration;
+                session_data.PPC(end+1) = PPC;
+                session_data.preferred_phase(end+1) = preferred_phase;
+                session_data.PPC_CI_lower(end+1) = PPC_CI_lower;
+                session_data.PPC_CI_upper(end+1) = PPC_CI_upper;
+                session_data.n_spikes(end+1) = n_spikes;
+                session_data.reliability{end+1} = reliability;
             end
         end
     end
 
+    % Convert session data to table and save
+    session_results.data = struct2table(session_data);
+    session_results.data.Properties.VariableNames{'unit_id'} = 'Unit';
+    session_results.data.Properties.VariableNames{'period'} = 'Period';
+    session_results.data.Properties.VariableNames{'band_name'} = 'Band';
+    session_results.data.Properties.VariableNames{'freq_low'} = 'Freq_Low_Hz';
+    session_results.data.Properties.VariableNames{'freq_high'} = 'Freq_High_Hz';
+    session_results.data.Properties.VariableNames{'period_duration'} = 'Period_Duration_sec';
+    session_results.data.Properties.VariableNames{'preferred_phase'} = 'Preferred_Phase_rad';
+    session_results.data.Properties.VariableNames{'n_spikes'} = 'N_spikes';
+    session_results.data.Properties.VariableNames{'reliability'} = 'Reliability';
+
+    % Save session results
+    [~, base_filename, ~] = fileparts(spike_filename);
+    save_filename = fullfile(RewardAversivePath, sprintf('%s_unit_ppc.mat', base_filename));
+    save(save_filename, 'session_results', 'config', '-v7.3');
+
     elapsed = toc;
-    fprintf('  ✓ Session %d complete (%.1f sec)\n', n_valid_aversive, elapsed);
+    fprintf('  ✓ Session %d complete (%.1f sec). Saved: %s\n', n_valid_aversive, elapsed, save_filename);
 end
 
 fprintf('\n✓ Processed %d aversive sessions\n', n_valid_aversive);
-fprintf('  Total data points: %d\n\n', length(aversive_data.session_id));
+fprintf('  Results saved to: %s\n\n', RewardAversivePath);
 
 %% ========================================================================
 %  SECTION 5: PROCESS REWARD SESSIONS
 %  ========================================================================
 
 fprintf('==== PROCESSING REWARD SESSIONS ====\n');
-
-% Initialize storage
-reward_data = struct();
-reward_data.session_id = [];
-reward_data.unit_id = [];
-reward_data.period = [];
-reward_data.band_name = {};
-reward_data.session_name = {};
-reward_data.period_duration = [];
-reward_data.PPC = [];
-reward_data.preferred_phase = [];
-reward_data.PPC_CI_lower = [];
-reward_data.PPC_CI_upper = [];
-reward_data.n_spikes = [];
-reward_data.reliability = {};
 
 n_valid_reward = 0;
 
@@ -305,18 +339,53 @@ for sess_idx = 1:num_reward_sessions
     n_periods = 4;
     n_units = length(valid_spikes);
 
-    fprintf('  LFP channel: %d, Units: %d, Periods: %d\n', bestChannel, n_units, n_periods);
+    fprintf('  LFP channel: %d, Units: %d, Periods: %d, Fs: %.0f Hz\n', bestChannel, n_units, n_periods, Fs);
+
+    % Initialize session results storage
+    session_results = struct();
+    session_results.session_id = n_valid_reward;
+    session_results.filename = spike_filename;
+    session_results.session_type = 'RewardSeeking';
+    session_results.best_channel = bestChannel;
+    session_results.Fs = Fs;
+    session_results.n_units = n_units;
+    session_results.n_periods = n_periods;
+    session_results.period_boundaries = period_boundaries;
+
+    % Initialize data storage for this session
+    session_data = struct();
+    session_data.unit_id = [];
+    session_data.period = [];
+    session_data.band_name = {};
+    session_data.freq_low = [];
+    session_data.freq_high = [];
+    session_data.period_duration = [];
+    session_data.PPC = [];
+    session_data.preferred_phase = [];
+    session_data.PPC_CI_lower = [];
+    session_data.PPC_CI_upper = [];
+    session_data.n_spikes = [];
+    session_data.reliability = {};
 
     % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands...\n', n_bands);
+    fprintf('  Computing phase signals for %d frequency bands (0.1-150 Hz)...\n', n_bands);
     phase_signals = cell(n_bands, 1);
 
     for band_idx = 1:n_bands
         band_range = config.frequency_bands{band_idx, 2};
-        LFP_filtered = bandpass(LFP, band_range, Fs, 'ImpulseResponse', 'iir', 'Steepness', 0.95);
+
+        % Use robust filtering for low frequencies
+        LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
+
+        % Hilbert transform
         analytic_signal = hilbert(LFP_filtered);
         phase_signals{band_idx} = angle(analytic_signal);
+
+        if mod(band_idx, 30) == 0
+            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        end
     end
+    fprintf('  ✓ All phase signals computed\n');
 
     % Process each unit
     for unit_idx = 1:n_units
@@ -349,6 +418,7 @@ for sess_idx = 1:num_reward_sessions
             % Process each frequency band
             for band_idx = 1:n_bands
                 band_name = config.frequency_bands{band_idx, 1};
+                band_range = config.frequency_bands{band_idx, 2};
 
                 % Extract spike phases for this band
                 spike_phases = phase_signals{band_idx}(spike_indices);
@@ -360,123 +430,126 @@ for sess_idx = 1:num_reward_sessions
                 % Determine reliability
                 reliability = determine_reliability(n_spikes);
 
-                % Store data
-                reward_data.session_id(end+1) = n_valid_reward;
-                reward_data.unit_id(end+1) = (n_valid_reward + 10000) * 1000 + unit_idx;
-                reward_data.period(end+1) = period_idx;
-                reward_data.band_name{end+1} = band_name;
-                reward_data.session_name{end+1} = spike_filename;
-                reward_data.period_duration(end+1) = period_duration;
-                reward_data.PPC(end+1) = PPC;
-                reward_data.preferred_phase(end+1) = preferred_phase;
-                reward_data.PPC_CI_lower(end+1) = PPC_CI_lower;
-                reward_data.PPC_CI_upper(end+1) = PPC_CI_upper;
-                reward_data.n_spikes(end+1) = n_spikes;
-                reward_data.reliability{end+1} = reliability;
+                % Store data in session_data
+                session_data.unit_id(end+1) = unit_idx;
+                session_data.period(end+1) = period_idx;
+                session_data.band_name{end+1} = band_name;
+                session_data.freq_low(end+1) = band_range(1);
+                session_data.freq_high(end+1) = band_range(2);
+                session_data.period_duration(end+1) = period_duration;
+                session_data.PPC(end+1) = PPC;
+                session_data.preferred_phase(end+1) = preferred_phase;
+                session_data.PPC_CI_lower(end+1) = PPC_CI_lower;
+                session_data.PPC_CI_upper(end+1) = PPC_CI_upper;
+                session_data.n_spikes(end+1) = n_spikes;
+                session_data.reliability{end+1} = reliability;
             end
         end
     end
 
+    % Convert session data to table and save
+    session_results.data = struct2table(session_data);
+    session_results.data.Properties.VariableNames{'unit_id'} = 'Unit';
+    session_results.data.Properties.VariableNames{'period'} = 'Period';
+    session_results.data.Properties.VariableNames{'band_name'} = 'Band';
+    session_results.data.Properties.VariableNames{'freq_low'} = 'Freq_Low_Hz';
+    session_results.data.Properties.VariableNames{'freq_high'} = 'Freq_High_Hz';
+    session_results.data.Properties.VariableNames{'period_duration'} = 'Period_Duration_sec';
+    session_results.data.Properties.VariableNames{'preferred_phase'} = 'Preferred_Phase_rad';
+    session_results.data.Properties.VariableNames{'n_spikes'} = 'N_spikes';
+    session_results.data.Properties.VariableNames{'reliability'} = 'Reliability';
+
+    % Save session results
+    [~, base_filename, ~] = fileparts(spike_filename);
+    save_filename = fullfile(RewardSeekingPath, sprintf('%s_unit_ppc.mat', base_filename));
+    save(save_filename, 'session_results', 'config', '-v7.3');
+
     elapsed = toc;
-    fprintf('  ✓ Session %d complete (%.1f sec)\n', n_valid_reward, elapsed);
+    fprintf('  ✓ Session %d complete (%.1f sec). Saved: %s\n', n_valid_reward, elapsed, save_filename);
 end
 
 fprintf('\n✓ Processed %d reward sessions\n', n_valid_reward);
-fprintf('  Total data points: %d\n\n', length(reward_data.session_id));
+fprintf('  Results saved to: %s\n\n', RewardSeekingPath);
 
 %% ========================================================================
-%  SECTION 6: COMBINE AND SAVE RESULTS
+%  SECTION 6: SUMMARY
 %  ========================================================================
 
-fprintf('Combining data...\n');
-
-% Add SessionType
-aversive_data.session_type = repmat({'Aversive'}, length(aversive_data.session_id), 1);
-reward_data.session_type = repmat({'Reward'}, length(reward_data.session_id), 1);
-
-% Combine all data
-combined_data = struct();
-combined_data.session_id = [aversive_data.session_id(:); reward_data.session_id(:)];
-combined_data.unit_id = [aversive_data.unit_id(:); reward_data.unit_id(:)];
-combined_data.period = [aversive_data.period(:); reward_data.period(:)];
-combined_data.band_name = [aversive_data.band_name(:); reward_data.band_name(:)];
-combined_data.session_type = [aversive_data.session_type; reward_data.session_type];
-combined_data.period_duration = [aversive_data.period_duration(:); reward_data.period_duration(:)];
-combined_data.PPC = [aversive_data.PPC(:); reward_data.PPC(:)];
-combined_data.preferred_phase = [aversive_data.preferred_phase(:); reward_data.preferred_phase(:)];
-combined_data.PPC_CI_lower = [aversive_data.PPC_CI_lower(:); reward_data.PPC_CI_lower(:)];
-combined_data.PPC_CI_upper = [aversive_data.PPC_CI_upper(:); reward_data.PPC_CI_upper(:)];
-combined_data.n_spikes = [aversive_data.n_spikes(:); reward_data.n_spikes(:)];
-combined_data.reliability = [aversive_data.reliability(:); reward_data.reliability(:)];
-
-% Convert to table
-tbl_data = struct2table(combined_data);
-
-% Rename columns
-tbl_data.Properties.VariableNames{'session_id'} = 'Session';
-tbl_data.Properties.VariableNames{'unit_id'} = 'Unit';
-tbl_data.Properties.VariableNames{'period'} = 'Period';
-tbl_data.Properties.VariableNames{'band_name'} = 'Band';
-tbl_data.Properties.VariableNames{'session_type'} = 'SessionType';
-tbl_data.Properties.VariableNames{'period_duration'} = 'Period_Duration_sec';
-tbl_data.Properties.VariableNames{'preferred_phase'} = 'Preferred_Phase_rad';
-tbl_data.Properties.VariableNames{'n_spikes'} = 'N_spikes';
-tbl_data.Properties.VariableNames{'reliability'} = 'Reliability';
-
-% Convert to categorical
-tbl_data.Session = categorical(tbl_data.Session);
-tbl_data.Unit = categorical(tbl_data.Unit);
-tbl_data.Period = categorical(tbl_data.Period);
-tbl_data.Band = categorical(tbl_data.Band);
-tbl_data.SessionType = categorical(tbl_data.SessionType);
-tbl_data.Reliability = categorical(tbl_data.Reliability);
-
-fprintf('✓ Combined dataset created\n');
-fprintf('  Total data points: %d\n', height(tbl_data));
-fprintf('  Sessions: %d aversive, %d reward\n', n_valid_aversive, n_valid_reward);
-fprintf('  Frequency bands: %d\n\n', n_bands);
-
-%% Save results
-fprintf('Saving results...\n');
-
-results = struct();
-results.tbl_data = tbl_data;
-results.config = config;
-results.n_aversive_sessions = n_valid_aversive;
-results.n_reward_sessions = n_valid_reward;
-results.avg_time_boundaries = avg_time_boundaries;
-
-timestamp = datestr(now, 'dd-mmm-yyyy');
-save_filename = sprintf('Unit_PPC_analysis_%s.mat', timestamp);
-save(save_filename, 'results', '-v7.3');
-
-fprintf('✓ Results saved to: %s\n', save_filename);
-
-%% ========================================================================
-%  SUMMARY
-%  ========================================================================
-
-fprintf('\n=== ANALYSIS COMPLETE ===\n');
+fprintf('\n========================================\n');
+fprintf('ANALYSIS COMPLETE!\n');
+fprintf('========================================\n');
 fprintf('Summary:\n');
-fprintf('  Aversive: %d sessions, 7 periods each\n', n_valid_aversive);
-fprintf('  Reward: %d sessions, 4 periods each\n', n_valid_reward);
-fprintf('  Total units analyzed: %d\n', length(unique(tbl_data.Unit)));
-fprintf('  Frequency bands: %d\n', n_bands);
-fprintf('  Total data points: %d\n', height(tbl_data));
-fprintf('\nData structure:\n');
-fprintf('  Unit | Session | SessionType | Period | Band | PPC | \n');
-fprintf('  Preferred_Phase_rad | PPC_CI_lower | PPC_CI_upper | N_spikes | Reliability\n');
+fprintf('  Aversive sessions: %d (7 periods each)\n', n_valid_aversive);
+fprintf('  Reward sessions: %d (4 periods each)\n', n_valid_reward);
+fprintf('  Frequency bands: %d (1 Hz bins, 0.1-150 Hz)\n', n_bands);
+fprintf('\nResults saved to:\n');
+fprintf('  Aversive: %s\n', RewardAversivePath);
+fprintf('  Reward: %s\n', RewardSeekingPath);
+fprintf('\nEach session file contains:\n');
+fprintf('  - session_results.data table with columns:\n');
+fprintf('    Unit | Period | Band | Freq_Low_Hz | Freq_High_Hz |\n');
+fprintf('    PPC | Preferred_Phase_rad | PPC_CI_lower | PPC_CI_upper |\n');
+fprintf('    N_spikes | Reliability | Period_Duration_sec\n');
+fprintf('  - session_results.session_id, filename, session_type, etc.\n');
+fprintf('  - config (analysis parameters)\n');
 fprintf('\nPPC (Pairwise Phase Consistency):\n');
 fprintf('  - Range: [0, 1]\n');
 fprintf('  - Unbiased by spike count\n');
 fprintf('  - Comparable across neurons\n');
-fprintf('  - Bootstrap CI (500 samples, 95%% level)\n');
+if config.bootstrap_samples > 0
+    fprintf('  - Bootstrap CI enabled (%d samples)\n', config.bootstrap_samples);
+else
+    fprintf('  - Bootstrap CI disabled (faster computation)\n');
+end
 fprintf('========================================\n');
 
 
 %% ========================================================================
 %  HELPER FUNCTIONS
 %  ========================================================================
+
+function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
+% Robust LFP filtering for different frequency ranges
+%
+% INPUTS:
+%   LFP        - LFP signal vector
+%   band_range - [low_freq, high_freq] in Hz
+%   Fs         - Sampling frequency in Hz
+%
+% OUTPUTS:
+%   LFP_filtered - Filtered LFP signal
+
+    low_freq = band_range(1);
+    high_freq = band_range(2);
+
+    % For very low frequencies (< 1 Hz), use different filtering strategy
+    if low_freq < 1
+        % Use FIR filter with longer order for low frequencies
+        % Ensure filter order is appropriate for the data length
+        filter_order = min(round(3 * Fs / low_freq), length(LFP) - 1);
+        filter_order = max(filter_order, 100);  % Minimum order
+
+        % Design FIR bandpass filter
+        if high_freq < Fs/2
+            LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        else
+            % High-pass only if high_freq exceeds Nyquist
+            LFP_filtered = highpass(LFP, low_freq, Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        end
+    else
+        % For higher frequencies, use IIR filter (faster)
+        try
+            LFP_filtered = bandpass(LFP, band_range, Fs, ...
+                'ImpulseResponse', 'iir', 'Steepness', 0.95);
+        catch
+            % Fallback to FIR if IIR fails
+            LFP_filtered = bandpass(LFP, band_range, Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        end
+    end
+end
 
 function PPC = calculate_PPC(phases)
 % Calculate Pairwise Phase Consistency (PPC)
@@ -517,14 +590,14 @@ function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with
 %
 % INPUTS:
 %   phases      - Nx1 vector of phase angles in radians
-%   n_bootstrap - Number of bootstrap samples
+%   n_bootstrap - Number of bootstrap samples (0 to skip bootstrap)
 %   ci_level    - Confidence interval level (e.g., 0.95)
 %
 % OUTPUTS:
 %   PPC           - Pairwise Phase Consistency
 %   preferred_phase - Mean phase angle (circular mean)
-%   PPC_CI_lower  - Lower bound of CI
-%   PPC_CI_upper  - Upper bound of CI
+%   PPC_CI_lower  - Lower bound of CI (NaN if bootstrap disabled)
+%   PPC_CI_upper  - Upper bound of CI (NaN if bootstrap disabled)
 
     N = length(phases);
 
@@ -544,8 +617,8 @@ function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with
     mean_y = mean(sin(phases));
     preferred_phase = atan2(mean_y, mean_x);
 
-    % Bootstrap confidence intervals for PPC
-    if N >= 10 && n_bootstrap > 0
+    % Bootstrap confidence intervals for PPC (if enabled)
+    if n_bootstrap > 0 && N >= 10
         bootstrap_PPC = zeros(n_bootstrap, 1);
 
         for b = 1:n_bootstrap
@@ -560,6 +633,7 @@ function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with
         PPC_CI_lower = prctile(bootstrap_PPC, 100 * alpha / 2);
         PPC_CI_upper = prctile(bootstrap_PPC, 100 * (1 - alpha / 2));
     else
+        % Bootstrap disabled - fill with NaN
         PPC_CI_lower = NaN;
         PPC_CI_upper = NaN;
     end
