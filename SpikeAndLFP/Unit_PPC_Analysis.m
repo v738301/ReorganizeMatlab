@@ -286,32 +286,8 @@ fprintf('==== PROCESSING REWARD SESSIONS ====\n');
 
 n_valid_reward = 0;
 
-% Need to load aversive sessions to get time-matched periods
-fprintf('Loading aversive sessions for time-matching...\n');
-
-aversive_time_boundaries = {};
-for sess_idx = 1:num_aversive_sessions
-    Timelimits = 'No';
-    [NeuralTime, ~, ~, ~, ~, ~, ~, ~, AversiveSound, ~, ~, ~, TriggerMid] = ...
-        loadAndPrepareSessionData(allfiles_aversive(sess_idx), T_sorted, Timelimits);
-
-    aversive_onsets = find(diff(AversiveSound) == 1);
-    all_aversive_time = NeuralTime(aversive_onsets);
-
-    if length(all_aversive_time) >= 3
-        aversive_time_boundaries{sess_idx} = all_aversive_time(1:3)' - TriggerMid(1);
-    end
-end
-
-% Calculate average time boundaries
-all_boundaries = [];
-for i = 1:length(aversive_time_boundaries)
-    if ~isempty(aversive_time_boundaries{i})
-        all_boundaries = [all_boundaries; aversive_time_boundaries{i}];
-    end
-end
-avg_time_boundaries = mean(all_boundaries, 1);
-fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] sec\n\n', avg_time_boundaries);
+avg_time_boundaries = [0, 8*60, 16*60, 24*60, 30*60];
+fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] seconds\n', avg_time_boundaries);
 
 % Process reward sessions
 for sess_idx = 1:num_reward_sessions
@@ -332,9 +308,7 @@ for sess_idx = 1:num_reward_sessions
     spike_filename = allfiles_reward(sess_idx).name;
 
     % Define 4 period boundaries using time-matched approach
-    period_boundaries = [TriggerMid(1), ...
-                         avg_time_boundaries + TriggerMid(1), ...
-                         TriggerMid(end)];
+    period_boundaries = [avg_time_boundaries + TriggerMid(1)];
 
     n_periods = 4;
     n_units = length(valid_spikes);
