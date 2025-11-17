@@ -44,34 +44,26 @@ all_session_types = {};
 for i = 1:length(aversive_files)
     load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results');
     if ~isempty(session_results.data) && height(session_results.data) > 0
-        % Debug first file
-        if i == 1
-            fprintf('\nDebug - First aversive file structure:\n');
-            fprintf('  Table size: %d x %d\n', height(session_results.data), width(session_results.data));
-            fprintf('  Column names: %s\n', strjoin(session_results.data.Properties.VariableNames, ', '));
-            fprintf('  Unit size: %d x %d\n', size(session_results.data.Unit, 1), size(session_results.data.Unit, 2));
-            fprintf('  STA_Waveform size: %d x %d\n\n', size(session_results.data.STA_Waveform, 1), size(session_results.data.STA_Waveform, 2));
-        end
-
-        n_rows = height(session_results.data);
-
-        % Extract data as column vectors with validation
-        units = session_results.data.Unit(:);
-        periods = session_results.data.Period(:);
-        sta_waveforms = session_results.data.STA_Waveform(:);
-        sta_peaks = session_results.data.STA_Peak(:);
-        sta_consistency = session_results.data.STA_Consistency(:);
-        n_spikes = session_results.data.N_spikes(:);
-
-        % Validate all have correct number of rows
-        if length(units) ~= n_rows || length(periods) ~= n_rows || ...
-           length(sta_waveforms) ~= n_rows || length(sta_peaks) ~= n_rows || ...
-           length(sta_consistency) ~= n_rows || length(n_spikes) ~= n_rows
-            fprintf('Warning: Skipping file %s - inconsistent column sizes\n', aversive_files(i).name);
-            fprintf('  Expected %d rows, got: Unit=%d, Period=%d, STA_Waveform=%d, STA_Peak=%d, STA_Consistency=%d, N_spikes=%d\n', ...
-                    n_rows, length(units), length(periods), length(sta_waveforms), ...
-                    length(sta_peaks), length(sta_consistency), length(n_spikes));
-            continue;
+        % Handle struct2table issue: if table has 1 row with array-valued columns,
+        % extract the arrays directly
+        if height(session_results.data) == 1
+            % Data stored as arrays in single row - extract them
+            units = session_results.data.Unit(:);
+            periods = session_results.data.Period(:);
+            sta_waveforms = session_results.data.STA_Waveform(:);
+            sta_peaks = session_results.data.STA_Peak(:);
+            sta_consistency = session_results.data.STA_Consistency(:);
+            n_spikes = session_results.data.N_spikes(:);
+            n_rows = length(units);
+        else
+            % Normal multi-row table
+            n_rows = height(session_results.data);
+            units = session_results.data.Unit(:);
+            periods = session_results.data.Period(:);
+            sta_waveforms = session_results.data.STA_Waveform(:);
+            sta_peaks = session_results.data.STA_Peak(:);
+            sta_consistency = session_results.data.STA_Consistency(:);
+            n_spikes = session_results.data.N_spikes(:);
         end
 
         all_units = [all_units; units];
@@ -87,25 +79,26 @@ end
 for i = 1:length(reward_files)
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data) && height(session_results.data) > 0
-        n_rows = height(session_results.data);
-
-        % Extract data as column vectors with validation
-        units = session_results.data.Unit(:);
-        periods = session_results.data.Period(:);
-        sta_waveforms = session_results.data.STA_Waveform(:);
-        sta_peaks = session_results.data.STA_Peak(:);
-        sta_consistency = session_results.data.STA_Consistency(:);
-        n_spikes = session_results.data.N_spikes(:);
-
-        % Validate all have correct number of rows
-        if length(units) ~= n_rows || length(periods) ~= n_rows || ...
-           length(sta_waveforms) ~= n_rows || length(sta_peaks) ~= n_rows || ...
-           length(sta_consistency) ~= n_rows || length(n_spikes) ~= n_rows
-            fprintf('Warning: Skipping file %s - inconsistent column sizes\n', reward_files(i).name);
-            fprintf('  Expected %d rows, got: Unit=%d, Period=%d, STA_Waveform=%d, STA_Peak=%d, STA_Consistency=%d, N_spikes=%d\n', ...
-                    n_rows, length(units), length(periods), length(sta_waveforms), ...
-                    length(sta_peaks), length(sta_consistency), length(n_spikes));
-            continue;
+        % Handle struct2table issue: if table has 1 row with array-valued columns,
+        % extract the arrays directly
+        if height(session_results.data) == 1
+            % Data stored as arrays in single row - extract them
+            units = session_results.data.Unit(:);
+            periods = session_results.data.Period(:);
+            sta_waveforms = session_results.data.STA_Waveform(:);
+            sta_peaks = session_results.data.STA_Peak(:);
+            sta_consistency = session_results.data.STA_Consistency(:);
+            n_spikes = session_results.data.N_spikes(:);
+            n_rows = length(units);
+        else
+            % Normal multi-row table
+            n_rows = height(session_results.data);
+            units = session_results.data.Unit(:);
+            periods = session_results.data.Period(:);
+            sta_waveforms = session_results.data.STA_Waveform(:);
+            sta_peaks = session_results.data.STA_Peak(:);
+            sta_consistency = session_results.data.STA_Consistency(:);
+            n_spikes = session_results.data.N_spikes(:);
         end
 
         all_units = [all_units; units];
@@ -122,16 +115,6 @@ end
 if isempty(all_units)
     error('No data found in any session files');
 end
-
-% Debug: Check array sizes before creating table
-fprintf('\nDebug - Array sizes:\n');
-fprintf('  all_units: %d x %d (numel=%d)\n', size(all_units, 1), size(all_units, 2), numel(all_units));
-fprintf('  all_periods: %d x %d (numel=%d)\n', size(all_periods, 1), size(all_periods, 2), numel(all_periods));
-fprintf('  all_sta_waveforms: %d x %d (numel=%d)\n', size(all_sta_waveforms, 1), size(all_sta_waveforms, 2), numel(all_sta_waveforms));
-fprintf('  all_sta_peaks: %d x %d (numel=%d)\n', size(all_sta_peaks, 1), size(all_sta_peaks, 2), numel(all_sta_peaks));
-fprintf('  all_sta_consistency: %d x %d (numel=%d)\n', size(all_sta_consistency, 1), size(all_sta_consistency, 2), numel(all_sta_consistency));
-fprintf('  all_n_spikes: %d x %d (numel=%d)\n', size(all_n_spikes, 1), size(all_n_spikes, 2), numel(all_n_spikes));
-fprintf('  all_session_types: %d x %d (numel=%d)\n\n', size(all_session_types, 1), size(all_session_types, 2), numel(all_session_types));
 
 % Create single table with guaranteed correct dimensions
 tbl = table(all_units, all_periods, all_sta_waveforms, all_sta_peaks, ...
