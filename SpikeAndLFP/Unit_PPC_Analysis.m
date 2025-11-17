@@ -112,7 +112,7 @@ fprintf('==== PROCESSING AVERSIVE SESSIONS ====\n');
 
 n_valid_aversive = 0;
 
-for sess_idx = 1:num_aversive_sessions
+for sess_idx = 1%:num_aversive_sessions
     fprintf('\n[%d/%d] Processing: %s\n', sess_idx, num_aversive_sessions, allfiles_aversive(sess_idx).name);
     tic;
 
@@ -543,7 +543,7 @@ function ppc = calculate_PPC(phases, varargin)
 %     Same paper → Eq. 13 & population PPC = PLV² → leads to complex version
 
 ip = inputParser;
-ip.addParameter('method','complex',@(x) any(validatestring(x,{'complex','cosdiff','plv'})));
+ip.addParameter('method','plv',@(x) any(validatestring(x,{'complex','cosdiff','plv'})));
 ip.parse(varargin{:});
 method = ip.Results.method;
 

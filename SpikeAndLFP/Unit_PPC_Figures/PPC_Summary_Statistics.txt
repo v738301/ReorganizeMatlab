@@ -2,13 +2,13 @@
 UNIT PPC ANALYSIS - SUMMARY STATISTICS
 ========================================
 
-Generated: 17-Nov-2025 17:28:46
+Generated: 17-Nov-2025 18:32:09
 
 Dataset Overview:
   Total data points: 107236
   Aversive sessions: 26
   Reward sessions: 26
-  Frequency bands: 19 (1 Hz resolution)
+  Frequency bands: 18 (1 Hz resolution)
   Frequency range: 0.1 - 19.0 Hz
 
 --- Aversive Sessions ---
