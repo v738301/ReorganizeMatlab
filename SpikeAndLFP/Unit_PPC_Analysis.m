@@ -159,20 +159,36 @@ for sess_idx = 1:num_aversive_sessions
     session_results.n_periods = n_periods;
     session_results.period_boundaries = period_boundaries;
 
-    % Initialize data storage for this session
-    session_data = struct();
-    session_data.unit_id = [];
-    session_data.period = [];
-    session_data.band_name = {};
-    session_data.freq_low = [];
-    session_data.freq_high = [];
-    session_data.period_duration = [];
-    session_data.PPC = [];
-    session_data.preferred_phase = [];
-    session_data.PPC_CI_lower = [];
-    session_data.PPC_CI_upper = [];
-    session_data.n_spikes = [];
-    session_data.reliability = {};
+    % PERFORMANCE OPTIMIZATION 1: Pre-compute time→index mapping
+    % Avoid repeated interp1 calls (very slow for many spikes)
+    t0 = NeuralTime(1);
+    dt = median(diff(NeuralTime));
+    spikeIdx = @(t) max(1, min(length(NeuralTime), round((t - t0) / dt) + 1));
+
+    % PERFORMANCE OPTIMIZATION 2: Count rows and pre-allocate table
+    % Avoid dynamic growth with end+1 (causes repeated memory reallocation)
+    fprintf('  Counting valid unit-period combinations...\n');
+    nRows = 0;
+    for u = 1:n_units
+        st = valid_spikes{u};
+        if isempty(st), continue; end
+        for p = 1:n_periods
+            sp = st(st >= period_boundaries(p) & st < period_boundaries(p + 1));
+            if numel(sp) >= config.min_spikes
+                nRows = nRows + 1;
+            end
+        end
+    end
+    nRows = nRows * n_bands;
+    fprintf('  Pre-allocating table for %d rows...\n', nRows);
+
+    % Pre-allocate table with exact size
+    session_tbl = table('Size', [nRows, 12], ...
+        'VariableTypes', {'uint16', 'uint8', 'string', 'double', 'double', 'double', ...
+                          'double', 'double', 'double', 'double', 'uint32', 'string'}, ...
+        'VariableNames', {'Unit', 'Period', 'Band', 'Freq_Low_Hz', 'Freq_High_Hz', 'Period_Duration_sec', ...
+                          'PPC', 'Preferred_Phase_rad', 'PPC_CI_lower', 'PPC_CI_upper', 'N_spikes', 'Reliability'});
+    row = 0;
 
 
     fprintf(['  Processing %d frequency bands (0.1-20 Hz) \n'], n_bands);
@@ -214,10 +230,8 @@ for sess_idx = 1:num_aversive_sessions
                     continue;
                 end
 
-                % Convert spike times to indices in NeuralTime
-                spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
-                spike_indices = round(spike_indices);
-                spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
+                % Convert spike times to indices using pre-computed function
+                spike_indices = arrayfun(spikeIdx, spikes_in_period);
 
                 % Extract spike phases for this band
                 spike_phases = phase_signal(spike_indices);
@@ -229,19 +243,20 @@ for sess_idx = 1:num_aversive_sessions
                 % Determine reliability
                 reliability = determine_reliability(n_spikes);
 
-                % Store data in session_data
-                session_data.unit_id(end+1) = unit_idx;
-                session_data.period(end+1) = period_idx;
-                session_data.band_name{end+1} = band_name;
-                session_data.freq_low(end+1) = band_range(1);
-                session_data.freq_high(end+1) = band_range(2);
-                session_data.period_duration(end+1) = period_duration;
-                session_data.PPC(end+1) = PPC;
-                session_data.preferred_phase(end+1) = preferred_phase;
-                session_data.PPC_CI_lower(end+1) = PPC_CI_lower;
-                session_data.PPC_CI_upper(end+1) = PPC_CI_upper;
-                session_data.n_spikes(end+1) = n_spikes;
-                session_data.reliability{end+1} = reliability;
+                % Store data in pre-allocated table (much faster than end+1)
+                row = row + 1;
+                session_tbl.Unit(row) = unit_idx;
+                session_tbl.Period(row) = period_idx;
+                session_tbl.Band(row) = band_name;
+                session_tbl.Freq_Low_Hz(row) = band_range(1);
+                session_tbl.Freq_High_Hz(row) = band_range(2);
+                session_tbl.Period_Duration_sec(row) = period_duration;
+                session_tbl.PPC(row) = PPC;
+                session_tbl.Preferred_Phase_rad(row) = preferred_phase;
+                session_tbl.PPC_CI_lower(row) = PPC_CI_lower;
+                session_tbl.PPC_CI_upper(row) = PPC_CI_upper;
+                session_tbl.N_spikes(row) = n_spikes;
+                session_tbl.Reliability(row) = reliability;
             end
         end
 
@@ -251,17 +266,8 @@ for sess_idx = 1:num_aversive_sessions
     end
     fprintf('  ✓ All bands processed\n');
 
-    % Convert session data to table and save
-    session_results.data = struct2table(session_data);
-    session_results.data.Properties.VariableNames{'unit_id'} = 'Unit';
-    session_results.data.Properties.VariableNames{'period'} = 'Period';
-    session_results.data.Properties.VariableNames{'band_name'} = 'Band';
-    session_results.data.Properties.VariableNames{'freq_low'} = 'Freq_Low_Hz';
-    session_results.data.Properties.VariableNames{'freq_high'} = 'Freq_High_Hz';
-    session_results.data.Properties.VariableNames{'period_duration'} = 'Period_Duration_sec';
-    session_results.data.Properties.VariableNames{'preferred_phase'} = 'Preferred_Phase_rad';
-    session_results.data.Properties.VariableNames{'n_spikes'} = 'N_spikes';
-    session_results.data.Properties.VariableNames{'reliability'} = 'Reliability';
+    % Store table in session results (variable names already set during pre-allocation)
+    session_results.data = session_tbl;
 
     % Save session results
     [~, base_filename, ~] = fileparts(spike_filename);
@@ -323,20 +329,36 @@ for sess_idx = 1:num_reward_sessions
     session_results.n_periods = n_periods;
     session_results.period_boundaries = period_boundaries;
 
-    % Initialize data storage for this session
-    session_data = struct();
-    session_data.unit_id = [];
-    session_data.period = [];
-    session_data.band_name = {};
-    session_data.freq_low = [];
-    session_data.freq_high = [];
-    session_data.period_duration = [];
-    session_data.PPC = [];
-    session_data.preferred_phase = [];
-    session_data.PPC_CI_lower = [];
-    session_data.PPC_CI_upper = [];
-    session_data.n_spikes = [];
-    session_data.reliability = {};
+    % PERFORMANCE OPTIMIZATION 1: Pre-compute time→index mapping
+    % Avoid repeated interp1 calls (very slow for many spikes)
+    t0 = NeuralTime(1);
+    dt = median(diff(NeuralTime));
+    spikeIdx = @(t) max(1, min(length(NeuralTime), round((t - t0) / dt) + 1));
+
+    % PERFORMANCE OPTIMIZATION 2: Count rows and pre-allocate table
+    % Avoid dynamic growth with end+1 (causes repeated memory reallocation)
+    fprintf('  Counting valid unit-period combinations...\n');
+    nRows = 0;
+    for u = 1:n_units
+        st = valid_spikes{u};
+        if isempty(st), continue; end
+        for p = 1:n_periods
+            sp = st(st >= period_boundaries(p) & st < period_boundaries(p + 1));
+            if numel(sp) >= config.min_spikes
+                nRows = nRows + 1;
+            end
+        end
+    end
+    nRows = nRows * n_bands;
+    fprintf('  Pre-allocating table for %d rows...\n', nRows);
+
+    % Pre-allocate table with exact size
+    session_tbl = table('Size', [nRows, 12], ...
+        'VariableTypes', {'uint16', 'uint8', 'string', 'double', 'double', 'double', ...
+                          'double', 'double', 'double', 'double', 'uint32', 'string'}, ...
+        'VariableNames', {'Unit', 'Period', 'Band', 'Freq_Low_Hz', 'Freq_High_Hz', 'Period_Duration_sec', ...
+                          'PPC', 'Preferred_Phase_rad', 'PPC_CI_lower', 'PPC_CI_upper', 'N_spikes', 'Reliability'});
+    row = 0;
 
     fprintf('  Processing %d frequency bands (0.1-20 Hz) \n', n_bands);
 
@@ -377,10 +399,8 @@ for sess_idx = 1:num_reward_sessions
                     continue;
                 end
 
-                % Convert spike times to indices in NeuralTime
-                spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
-                spike_indices = round(spike_indices);
-                spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
+                % Convert spike times to indices using pre-computed function
+                spike_indices = arrayfun(spikeIdx, spikes_in_period);
 
                 % Extract spike phases for this band
                 spike_phases = phase_signal(spike_indices);
@@ -392,19 +412,20 @@ for sess_idx = 1:num_reward_sessions
                 % Determine reliability
                 reliability = determine_reliability(n_spikes);
 
-                % Store data in session_data
-                session_data.unit_id(end+1) = unit_idx;
-                session_data.period(end+1) = period_idx;
-                session_data.band_name{end+1} = band_name;
-                session_data.freq_low(end+1) = band_range(1);
-                session_data.freq_high(end+1) = band_range(2);
-                session_data.period_duration(end+1) = period_duration;
-                session_data.PPC(end+1) = PPC;
-                session_data.preferred_phase(end+1) = preferred_phase;
-                session_data.PPC_CI_lower(end+1) = PPC_CI_lower;
-                session_data.PPC_CI_upper(end+1) = PPC_CI_upper;
-                session_data.n_spikes(end+1) = n_spikes;
-                session_data.reliability{end+1} = reliability;
+                % Store data in pre-allocated table (much faster than end+1)
+                row = row + 1;
+                session_tbl.Unit(row) = unit_idx;
+                session_tbl.Period(row) = period_idx;
+                session_tbl.Band(row) = band_name;
+                session_tbl.Freq_Low_Hz(row) = band_range(1);
+                session_tbl.Freq_High_Hz(row) = band_range(2);
+                session_tbl.Period_Duration_sec(row) = period_duration;
+                session_tbl.PPC(row) = PPC;
+                session_tbl.Preferred_Phase_rad(row) = preferred_phase;
+                session_tbl.PPC_CI_lower(row) = PPC_CI_lower;
+                session_tbl.PPC_CI_upper(row) = PPC_CI_upper;
+                session_tbl.N_spikes(row) = n_spikes;
+                session_tbl.Reliability(row) = reliability;
             end
         end
 
@@ -414,17 +435,8 @@ for sess_idx = 1:num_reward_sessions
     end
     fprintf('  ✓ All bands processed\n');
 
-    % Convert session data to table and save
-    session_results.data = struct2table(session_data);
-    session_results.data.Properties.VariableNames{'unit_id'} = 'Unit';
-    session_results.data.Properties.VariableNames{'period'} = 'Period';
-    session_results.data.Properties.VariableNames{'band_name'} = 'Band';
-    session_results.data.Properties.VariableNames{'freq_low'} = 'Freq_Low_Hz';
-    session_results.data.Properties.VariableNames{'freq_high'} = 'Freq_High_Hz';
-    session_results.data.Properties.VariableNames{'period_duration'} = 'Period_Duration_sec';
-    session_results.data.Properties.VariableNames{'preferred_phase'} = 'Preferred_Phase_rad';
-    session_results.data.Properties.VariableNames{'n_spikes'} = 'N_spikes';
-    session_results.data.Properties.VariableNames{'reliability'} = 'Reliability';
+    % Store table in session results (variable names already set during pre-allocation)
+    session_results.data = session_tbl;
 
     % Save session results
     [~, base_filename, ~] = fileparts(spike_filename);
