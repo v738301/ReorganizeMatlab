@@ -7,7 +7,7 @@
 %  SessionType: Aversive vs Reward
 %  Aversive Periods: P1-P7 (6 aversive noises create 7 periods)
 %  Reward Periods: P1-P4 (time-matched to aversive)
-%  Frequency Bands: 1 Hz bins from 0.1 to 150 Hz (150 bands)
+%  Frequency Bands: 1 Hz bins from 0.1 to 20 Hz (20 bands)
 %
 %  PPC (Pairwise Phase Consistency) advantages:
 %  - Unbiased by spike count (unlike MRL)
@@ -26,13 +26,13 @@ close all
 
 fprintf('=== UNIT PPC ANALYSIS: AVERSIVE vs REWARD ===\n');
 fprintf('Pairwise Phase Consistency for Spike-LFP Coupling\n');
-fprintf('1 Hz frequency bins from 0.1 to 150 Hz\n\n');
+fprintf('1 Hz frequency bins from 0.1 to 20 Hz\n\n');
 
 config = struct();
 
-% Generate frequency bands: 1 Hz bins from 0.1 to 150 Hz
-freq_start = 0.1:1:149;
-freq_end = 1:1:150;
+% Generate frequency bands: 1 Hz bins from 0.1 to 20 Hz
+freq_start = 0.1:1:19;
+freq_end = 1:1:20;
 n_bands = length(freq_start);
 
 config.frequency_bands = cell(n_bands, 2);
@@ -175,13 +175,13 @@ for sess_idx = 1:num_aversive_sessions
     session_data.reliability = {};
 
     % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands (0.1-150 Hz)...\n', n_bands);
+    fprintf('  Computing phase signals for %d frequency bands (0.1-20 Hz)...\n', n_bands);
     phase_signals = cell(n_bands, 1);
 
     for band_idx = 1:n_bands
         band_range = config.frequency_bands{band_idx, 2};
 
-        % Use robust filtering for low frequencies
+        % Apply unified FIR bandpass filtering
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
 
         % Hilbert transform to get instantaneous phase
@@ -342,13 +342,13 @@ for sess_idx = 1:num_reward_sessions
     session_data.reliability = {};
 
     % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands (0.1-150 Hz)...\n', n_bands);
+    fprintf('  Computing phase signals for %d frequency bands (0.1-20 Hz)...\n', n_bands);
     phase_signals = cell(n_bands, 1);
 
     for band_idx = 1:n_bands
         band_range = config.frequency_bands{band_idx, 2};
 
-        % Use robust filtering for low frequencies
+        % Apply unified FIR bandpass filtering
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
 
         % Hilbert transform
@@ -455,7 +455,7 @@ fprintf('========================================\n');
 fprintf('Summary:\n');
 fprintf('  Aversive sessions: %d (7 periods each)\n', n_valid_aversive);
 fprintf('  Reward sessions: %d (4 periods each)\n', n_valid_reward);
-fprintf('  Frequency bands: %d (1 Hz bins, 0.1-150 Hz)\n', n_bands);
+fprintf('  Frequency bands: %d (1 Hz bins, 0.1-20 Hz)\n', n_bands);
 fprintf('\nResults saved to:\n');
 fprintf('  Aversive: %s\n', RewardAversivePath);
 fprintf('  Reward: %s\n', RewardSeekingPath);
@@ -483,7 +483,7 @@ fprintf('========================================\n');
 %  ========================================================================
 
 function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
-% Robust LFP filtering for different frequency ranges
+% Unified LFP filtering using FIR filters
 %
 % INPUTS:
 %   LFP        - LFP signal vector
@@ -496,32 +496,15 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
     low_freq = band_range(1);
     high_freq = band_range(2);
 
-    % For very low frequencies (< 1 Hz), use different filtering strategy
-    if low_freq < 1
-        % Use FIR filter with longer order for low frequencies
-        % Ensure filter order is appropriate for the data length
-        filter_order = min(round(3 * Fs / low_freq), length(LFP) - 1);
-        filter_order = max(filter_order, 100);  % Minimum order
-
-        % Design FIR bandpass filter
-        if high_freq < Fs/2
-            LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        else
-            % High-pass only if high_freq exceeds Nyquist
-            LFP_filtered = highpass(LFP, low_freq, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        end
+    % Use FIR filter for all frequency bands (unified strategy)
+    % FIR filters provide linear phase response and better stability for low frequencies
+    if high_freq < Fs/2
+        LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
     else
-        % For higher frequencies, use IIR filter (faster)
-        try
-            LFP_filtered = bandpass(LFP, band_range, Fs, ...
-                'ImpulseResponse', 'iir', 'Steepness', 0.95);
-        catch
-            % Fallback to FIR if IIR fails
-            LFP_filtered = bandpass(LFP, band_range, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        end
+        % High-pass only if high_freq exceeds Nyquist
+        LFP_filtered = highpass(LFP, low_freq, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
     end
 end
 
