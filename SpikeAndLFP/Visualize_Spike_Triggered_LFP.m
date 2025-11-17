@@ -151,7 +151,7 @@ for p = 1:4
     aversive_data = tbl(tbl.SessionType == 'Aversive' & tbl.Period == p, :);
     if ~isempty(aversive_data)
         % Average across all units
-        all_waveforms = cell2mat(aversive_data.STA_Waveform');
+        all_waveforms = cell2mat(aversive_data.STA_Waveform);
         mean_sta = mean(all_waveforms, 1);
         sem_sta = std(all_waveforms, 0, 1) / sqrt(size(all_waveforms, 1));
 
@@ -170,7 +170,7 @@ for p = 1:4
     subplot(2, 4, 4 + p);
     reward_data = tbl(tbl.SessionType == 'Reward' & tbl.Period == p, :);
     if ~isempty(reward_data)
-        all_waveforms = cell2mat(reward_data.STA_Waveform');
+        all_waveforms = cell2mat(reward_data.STA_Waveform);
         mean_sta = mean(all_waveforms, 1);
         sem_sta = std(all_waveforms, 0, 1) / sqrt(size(all_waveforms, 1));
 
