@@ -344,6 +344,52 @@ end
 fprintf('  ✓ Saved %d unit examples\n', length(high_consistency_aversive) + length(low_consistency_aversive) + length(high_consistency_reward));
 
 %% ========================================================================
+%  FIGURE 6: UNIT × TIME HEATMAP (All STA Waveforms)
+%  ========================================================================
+
+fprintf('Creating Figure 6: Unit × Time Heatmap...\n');
+
+fig6 = figure('Position', [250, 250, 1800, 900]);
+sgtitle('All Units × Time: Spike-Triggered Average (Period 1)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Aversive P1
+subplot(1, 2, 1);
+aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
+if ~isempty(aversive_p1)
+    heatmap_data_av = createSTAHeatmap(aversive_p1);
+    imagesc(time_vec, 1:size(heatmap_data_av, 1), heatmap_data_av);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Time (s)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    hold on;
+    plot([0 0], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+% Reward P1
+subplot(1, 2, 2);
+reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
+if ~isempty(reward_p1)
+    heatmap_data_rw = createSTAHeatmap(reward_p1);
+    imagesc(time_vec, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Time (s)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    hold on;
+    plot([0 0], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+saveas(fig6, fullfile(output_dir, 'Figure6_Unit_Time_STA_Heatmap.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
 %  COMPLETION
 %  ========================================================================
 
@@ -522,4 +568,31 @@ function plot_single_unit(tbl, session_id, unit_id, time_vec, output_dir, color,
     saveas(fig, fullfile(output_dir, sprintf('Unit_Sess%d_Unit%d_%s_%s.png', ...
                          session_id, unit_id, consistency_label, name_only)));
     close(fig);
+end
+
+function heatmap_data = createSTAHeatmap(data)
+% Create heatmap matrix: units × time points
+%
+% INPUTS:
+%   data - Table with STA_Waveform for one period
+%
+% OUTPUTS:
+%   heatmap_data - Matrix (n_units × n_timepoints)
+
+    % Get unique units
+    unique_units = unique(data.Unit);
+    n_units = length(unique_units);
+
+    % Get first waveform to determine size
+    n_timepoints = length(data.STA_Waveform{1});
+
+    heatmap_data = nan(n_units, n_timepoints);
+
+    for u = 1:n_units
+        unit_data = data(data.Unit == unique_units(u), :);
+
+        if ~isempty(unit_data) && ~isempty(unit_data.STA_Waveform{1})
+            heatmap_data(u, :) = unit_data.STA_Waveform{1};
+        end
+    end
 end

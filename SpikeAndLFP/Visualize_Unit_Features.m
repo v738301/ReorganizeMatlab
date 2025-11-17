@@ -222,6 +222,50 @@ saveas(fig3, fullfile(output_dir, 'Figure3_Comprehensive_Heatmap.png'));
 fprintf('  ✓ Saved: Figure3_Comprehensive_Heatmap.png\n');
 
 %% ========================================================================
+%  FIGURE 4: UNIT × FEATURES HEATMAP (All Units)
+%  ========================================================================
+
+fprintf('Creating Figure 4: Unit × Features Heatmap...\n');
+
+fig4 = figure('Position', [200, 200, 1600, 1000]);
+sgtitle('All Units × All Features (Z-scored, Period 1)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Create heatmap for Aversive P1
+subplot(1, 2, 1);
+aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == categorical(1), :);
+if ~isempty(aversive_p1)
+    heatmap_data_av = createUnitFeaturesHeatmap(aversive_p1, all_metrics);
+    imagesc(heatmap_data_av);
+    colorbar;
+    caxis([-3, 3]);
+    colormap(jet);
+    xlabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
+    set(gca, 'YTick', []);
+end
+
+% Create heatmap for Reward P1
+subplot(1, 2, 2);
+reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == categorical(1), :);
+if ~isempty(reward_p1)
+    heatmap_data_rw = createUnitFeaturesHeatmap(reward_p1, all_metrics);
+    imagesc(heatmap_data_rw);
+    colorbar;
+    caxis([-3, 3]);
+    colormap(jet);
+    xlabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
+    set(gca, 'YTick', []);
+end
+
+saveas(fig4, fullfile(output_dir, 'Figure4_Unit_Features_Heatmap.png'));
+fprintf('  ✓ Saved: Figure4_Unit_Features_Heatmap.png\n');
+
+%% ========================================================================
 %  SECTION 3: SUMMARY STATISTICS
 %  ========================================================================
 
@@ -453,6 +497,45 @@ function heatmap_data = createHeatmapData(tbl, metrics, n_periods)
 
     % Z-score each metric across periods
     for m = 1:length(metrics)
+        metric_values = heatmap_data(:, m);
+        if sum(~isnan(metric_values)) > 1
+            heatmap_data(:, m) = (metric_values - nanmean(metric_values)) / nanstd(metric_values);
+        end
+    end
+end
+
+function heatmap_data = createUnitFeaturesHeatmap(tbl, metrics)
+% Create heatmap matrix: units × features (Z-scored)
+%
+% INPUTS:
+%   tbl     - Table with unit features for one period
+%   metrics - Cell array of metric names
+%
+% OUTPUTS:
+%   heatmap_data - Matrix (n_units × n_metrics) Z-scored
+
+    unique_units = unique(tbl.Unit);
+    n_units = length(unique_units);
+    n_metrics = length(metrics);
+
+    heatmap_data = nan(n_units, n_metrics);
+
+    for u = 1:n_units
+        unit_data = tbl(tbl.Unit == unique_units(u), :);
+
+        for m = 1:n_metrics
+            metric = metrics{m};
+            values = unit_data.(metric);
+            values = values(~isnan(values));
+
+            if ~isempty(values)
+                heatmap_data(u, m) = mean(values);
+            end
+        end
+    end
+
+    % Z-score each metric across units
+    for m = 1:n_metrics
         metric_values = heatmap_data(:, m);
         if sum(~isnan(metric_values)) > 1
             heatmap_data(:, m) = (metric_values - nanmean(metric_values)) / nanstd(metric_values);

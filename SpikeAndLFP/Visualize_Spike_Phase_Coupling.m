@@ -70,6 +70,43 @@ create_preferred_phase_plots(reward_data, aversive_data, band_names, band_ranges
 %% Figure 5: Example units with strong phase-locking
 create_example_units_plot(reward_seeking_results, reward_aversive_results, band_names, config);
 
+%% Figure 6: Simple Units × Bands Heatmap Overview
+fprintf('Creating Figure 6: Simple Units × Bands Heatmap...\n');
+
+fig = figure('Position', [300, 300, 1600, 900]);
+set(fig, 'Color', 'white');
+
+% Aversive heatmap
+subplot(1, 2, 1);
+[~, sort_idx_av] = sort(max(aversive_data.MRL, [], 2, 'omitnan'), 'descend');
+MRL_sorted_av = aversive_data.MRL(sort_idx_av, :);
+imagesc(1:n_bands, 1:size(MRL_sorted_av, 1), MRL_sorted_av);
+colormap(hot);
+colorbar;
+xlabel('Frequency Band', 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('Unit (sorted by max MRL)', 'FontSize', 12, 'FontWeight', 'bold');
+title('Aversive: Units × Bands (MRL)', 'FontSize', 13, 'FontWeight', 'bold');
+set(gca, 'XTick', 1:n_bands, 'XTickLabel', band_names, 'XTickLabelRotation', 45);
+set(gca, 'YTick', []);
+
+% Reward heatmap
+subplot(1, 2, 2);
+[~, sort_idx_rw] = sort(max(reward_data.MRL, [], 2, 'omitnan'), 'descend');
+MRL_sorted_rw = reward_data.MRL(sort_idx_rw, :);
+imagesc(1:n_bands, 1:size(MRL_sorted_rw, 1), MRL_sorted_rw);
+colormap(hot);
+colorbar;
+xlabel('Frequency Band', 'FontSize', 12, 'FontWeight', 'bold');
+ylabel('Unit (sorted by max MRL)', 'FontSize', 12, 'FontWeight', 'bold');
+title('Reward: Units × Bands (MRL)', 'FontSize', 13, 'FontWeight', 'bold');
+set(gca, 'XTick', 1:n_bands, 'XTickLabel', band_names, 'XTickLabelRotation', 45);
+set(gca, 'YTick', []);
+
+sgtitle('Phase-Locking Overview: All Units × Frequency Bands', ...
+    'FontSize', 16, 'FontWeight', 'bold');
+
+fprintf('  ✓ Saved: Figure 6: Simple Units × Bands Heatmap\n');
+
 fprintf('\nVisualization complete!\n');
 
 %% =========================
