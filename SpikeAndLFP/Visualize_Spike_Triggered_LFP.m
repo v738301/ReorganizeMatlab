@@ -32,37 +32,57 @@ reward_files = dir(fullfile(RewardSeekingPath, '*_sta.mat'));
 fprintf('  Aversive: %d files\n', length(aversive_files));
 fprintf('  Reward: %d files\n', length(reward_files));
 
-% Combine data - use cell arrays to collect tables first
-aversive_tables = {};
-reward_tables = {};
+% Combine data - collect all data into arrays first, then create single table
+all_units = [];
+all_periods = [];
+all_sta_waveforms = {};
+all_sta_peaks = [];
+all_sta_consistency = [];
+all_n_spikes = [];
+all_session_types = {};
 
 for i = 1:length(aversive_files)
     load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results');
     if ~isempty(session_results.data) && height(session_results.data) > 0
-        session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
-        aversive_tables{end+1} = session_results.data;
+        n_rows = height(session_results.data);
+
+        % Extract data as column vectors
+        all_units = [all_units; session_results.data.Unit(:)];
+        all_periods = [all_periods; session_results.data.Period(:)];
+        all_sta_waveforms = [all_sta_waveforms; session_results.data.STA_Waveform(:)];
+        all_sta_peaks = [all_sta_peaks; session_results.data.STA_Peak(:)];
+        all_sta_consistency = [all_sta_consistency; session_results.data.STA_Consistency(:)];
+        all_n_spikes = [all_n_spikes; session_results.data.N_spikes(:)];
+        all_session_types = [all_session_types; repmat({'Aversive'}, n_rows, 1)];
     end
 end
 
 for i = 1:length(reward_files)
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data) && height(session_results.data) > 0
-        session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
-        reward_tables{end+1} = session_results.data;
+        n_rows = height(session_results.data);
+
+        % Extract data as column vectors
+        all_units = [all_units; session_results.data.Unit(:)];
+        all_periods = [all_periods; session_results.data.Period(:)];
+        all_sta_waveforms = [all_sta_waveforms; session_results.data.STA_Waveform(:)];
+        all_sta_peaks = [all_sta_peaks; session_results.data.STA_Peak(:)];
+        all_sta_consistency = [all_sta_consistency; session_results.data.STA_Consistency(:)];
+        all_n_spikes = [all_n_spikes; session_results.data.N_spikes(:)];
+        all_session_types = [all_session_types; repmat({'Reward'}, n_rows, 1)];
         time_vec = session_results.time_vec;  % Get time vector
     end
 end
 
-% Concatenate all tables at once using vertcat
-if ~isempty(aversive_tables) && ~isempty(reward_tables)
-    tbl = vertcat(aversive_tables{:}, reward_tables{:});
-elseif ~isempty(aversive_tables)
-    tbl = vertcat(aversive_tables{:});
-elseif ~isempty(reward_tables)
-    tbl = vertcat(reward_tables{:});
-else
+if isempty(all_units)
     error('No data found in any session files');
 end
+
+% Create single table with guaranteed correct dimensions
+tbl = table(all_units, all_periods, all_sta_waveforms, all_sta_peaks, ...
+            all_sta_consistency, all_n_spikes, all_session_types, ...
+            'VariableNames', {'Unit', 'Period', 'STA_Waveform', 'STA_Peak', ...
+                              'STA_Consistency', 'N_spikes', 'SessionType'});
 tbl.SessionType = categorical(tbl.SessionType);
 
 fprintf('✓ Data loaded: %d total entries\n\n', height(tbl));
