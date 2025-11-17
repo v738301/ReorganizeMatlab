@@ -483,6 +483,8 @@ fprintf('========================================\n');
 
 function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
 % Unified LFP filtering using FIR filters
+% For <1 Hz bands: detrend + demean + lowpass (faster than bandpass)
+% For ≥1 Hz bands: standard bandpass filtering
 %
 % INPUTS:
 %   LFP        - LFP signal vector
@@ -495,15 +497,29 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
     low_freq = band_range(1);
     high_freq = band_range(2);
 
-    % Use FIR filter for all frequency bands (unified strategy)
-    % FIR filters provide linear phase response and better stability for low frequencies
-    if high_freq < Fs/2
-        LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
-            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+    % For very low frequency bands (<1 Hz): optimize by detrending + lowpass
+    if low_freq < 1
+        % Remove DC offset and slow drift
+        LFP_detrend = detrend(LFP);           % Remove linear trend
+        LFP_demean = LFP_detrend - mean(LFP_detrend);  % Remove mean
+
+        % Apply lowpass filter (much faster than bandpass with low cutoff)
+        if high_freq < Fs/2
+            LFP_filtered = lowpass(LFP_demean, high_freq, Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        else
+            LFP_filtered = LFP_demean;  % Already detrended/demeaned
+        end
     else
-        % High-pass only if high_freq exceeds Nyquist
-        LFP_filtered = highpass(LFP, low_freq, Fs, ...
-            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        % For higher frequencies: standard bandpass filtering
+        if high_freq < Fs/2
+            LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        else
+            % High-pass only if high_freq exceeds Nyquist
+            LFP_filtered = highpass(LFP, low_freq, Fs, ...
+                'ImpulseResponse', 'fir', 'Steepness', 0.85);
+        end
     end
 end
 
