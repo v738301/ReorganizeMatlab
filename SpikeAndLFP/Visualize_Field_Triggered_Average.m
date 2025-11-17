@@ -1,0 +1,434 @@
+%% ========================================================================
+%  VISUALIZE FIELD-TRIGGERED AVERAGE
+%  Spike rate as function of LFP phase
+%  ========================================================================
+%
+%  Creates visualizations to test phase-locking
+%
+%  Figure 1: FTA Curves (Cartesian) - spike rate vs phase
+%  Figure 2: FTA Polar Plots - circular representation
+%  Figure 3: Mean Vector Length Spectrum - phase-locking strength
+%  Figure 4: 8 Hz FTA Detailed Analysis
+%
+%  Interpretation:
+%  - Peaked FTA → Strong phase-locking (high MVL)
+%  - Flat FTA → No phase preference (low MVL)
+%  - MVL ≈ PPC (both measure phase-locking)
+%
+%% ========================================================================
+
+clear all
+close all
+
+%% ========================================================================
+%  SECTION 1: LOAD DATA
+%  ========================================================================
+
+fprintf('=== VISUALIZING FIELD-TRIGGERED AVERAGE ===\n\n');
+
+DataSetsPath = '/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/SpikeAndLFP/DataSet';
+RewardSeekingPath = fullfile(DataSetsPath, 'RewardSeeking_FTA');
+RewardAversivePath = fullfile(DataSetsPath, 'RewardAversive_FTA');
+
+% Load files
+fprintf('Loading FTA data...\n');
+aversive_files = dir(fullfile(RewardAversivePath, '*_fta.mat'));
+reward_files = dir(fullfile(RewardSeekingPath, '*_fta.mat'));
+
+fprintf('  Aversive: %d files\n', length(aversive_files));
+fprintf('  Reward: %d files\n', length(reward_files));
+
+% Combine data
+all_data_aversive = [];
+all_data_reward = [];
+
+for i = 1:length(aversive_files)
+    load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results', 'config');
+    if ~isempty(session_results.data)
+        session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
+        all_data_aversive = [all_data_aversive; session_results.data];
+    end
+end
+
+for i = 1:length(reward_files)
+    load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
+    if ~isempty(session_results.data)
+        session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
+        all_data_reward = [all_data_reward; session_results.data];
+    end
+end
+
+tbl = [all_data_aversive; all_data_reward];
+tbl.SessionType = categorical(tbl.SessionType);
+
+fprintf('✓ Data loaded: %d total entries\n\n', height(tbl));
+
+% Get phase centers from first entry
+phase_centers = tbl.Phase_Centers{1};
+n_phase_bins = length(phase_centers);
+
+%% ========================================================================
+%  SECTION 2: SETUP
+%  ========================================================================
+
+output_dir = 'FTA_Figures';
+if ~exist(output_dir, 'dir'), mkdir(output_dir); end
+
+color_aversive = [0.8 0.2 0.2];
+color_reward = [0.2 0.4 0.8];
+color_periods = lines(7);
+
+%% ========================================================================
+%  FIGURE 1: FTA CURVES (CARTESIAN)
+%  ========================================================================
+
+fprintf('Creating Figure 1: FTA Curves (Cartesian)...\n');
+
+fig1 = figure('Position', [50, 50, 1800, 900]);
+sgtitle('Field-Triggered Average: Spike Rate vs LFP Phase', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Plot first 4 periods for both session types, at 8 Hz
+data_8hz = tbl(abs((tbl.Freq_Low_Hz + tbl.Freq_High_Hz)/2 - 8) < 1, :);
+
+for p = 1:4
+    % Aversive
+    subplot(2, 4, p);
+    aversive_data = data_8hz(data_8hz.SessionType == 'Aversive' & data_8hz.Period == p, :);
+    if ~isempty(aversive_data)
+        plot_fta_cartesian(aversive_data, phase_centers, color_aversive);
+        title(sprintf('Aversive P%d (8 Hz, n=%d)', p, height(aversive_data)), 'FontSize', 11, 'FontWeight', 'bold');
+        if p == 1, ylabel('Normalized Spike Rate', 'FontSize', 10); end
+        xlabel('Phase (rad)', 'FontSize', 10);
+    end
+
+    % Reward
+    subplot(2, 4, 4 + p);
+    reward_data = data_8hz(data_8hz.SessionType == 'Reward' & data_8hz.Period == p, :);
+    if ~isempty(reward_data)
+        plot_fta_cartesian(reward_data, phase_centers, color_reward);
+        title(sprintf('Reward P%d (8 Hz, n=%d)', p, height(reward_data)), 'FontSize', 11, 'FontWeight', 'bold');
+        if p == 1, ylabel('Normalized Spike Rate', 'FontSize', 10); end
+        xlabel('Phase (rad)', 'FontSize', 10);
+    end
+end
+
+saveas(fig1, fullfile(output_dir, 'Figure1_FTA_Curves_Cartesian.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
+%  FIGURE 2: FTA POLAR PLOTS
+%  ========================================================================
+
+fprintf('Creating Figure 2: FTA Polar Plots...\n');
+
+fig2 = figure('Position', [100, 100, 1800, 900]);
+sgtitle('Field-Triggered Average: Polar Representation (8 Hz)', 'FontSize', 16, 'FontWeight', 'bold');
+
+for p = 1:4
+    % Aversive
+    subplot(2, 4, p, polaraxes);
+    aversive_data = data_8hz(data_8hz.SessionType == 'Aversive' & data_8hz.Period == p, :);
+    if ~isempty(aversive_data)
+        plot_fta_polar(aversive_data, phase_centers, color_aversive);
+        title(sprintf('Aversive P%d', p), 'FontSize', 11, 'FontWeight', 'bold');
+    end
+
+    % Reward
+    subplot(2, 4, 4 + p, polaraxes);
+    reward_data = data_8hz(data_8hz.SessionType == 'Reward' & data_8hz.Period == p, :);
+    if ~isempty(reward_data)
+        plot_fta_polar(reward_data, phase_centers, color_reward);
+        title(sprintf('Reward P%d', p), 'FontSize', 11, 'FontWeight', 'bold');
+    end
+end
+
+saveas(fig2, fullfile(output_dir, 'Figure2_FTA_Polar_Plots.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
+%  FIGURE 3: MEAN VECTOR LENGTH SPECTRUM
+%  ========================================================================
+
+fprintf('Creating Figure 3: Mean Vector Length Spectrum...\n');
+
+fig3 = figure('Position', [150, 150, 1600, 900]);
+sgtitle('Mean Vector Length vs Frequency (Phase-Locking Strength)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Get frequency centers
+freq_centers = (tbl.Freq_Low_Hz + tbl.Freq_High_Hz) / 2;
+unique_freqs = unique(freq_centers);
+
+% Aversive (7 periods)
+for p = 1:7
+    subplot(2, 4, p);
+    aversive_data = tbl(tbl.SessionType == 'Aversive' & tbl.Period == p, :);
+
+    if ~isempty(aversive_data)
+        plot_mvl_spectrum(aversive_data, unique_freqs, color_aversive);
+        title(sprintf('Aversive P%d', p), 'FontSize', 12, 'FontWeight', 'bold');
+        if p == 1, ylabel('Mean Vector Length', 'FontSize', 11); end
+        if p >= 5, xlabel('Frequency (Hz)', 'FontSize', 11); end
+    end
+end
+
+% Reward (4 periods)
+subplot(2, 4, 8);
+for p = 1:4
+    reward_data = tbl(tbl.SessionType == 'Reward' & tbl.Period == p, :);
+
+    if ~isempty(reward_data)
+        [mean_mvl, ~, ~] = compute_frequency_average(reward_data, unique_freqs, 'Mean_Vector_Length');
+        hold on;
+        plot(unique_freqs, mean_mvl, 'o-', 'Color', color_periods(p, :), ...
+             'LineWidth', 1.5, 'MarkerSize', 6, 'MarkerFaceColor', color_periods(p, :), ...
+             'DisplayName', sprintf('P%d', p));
+    end
+end
+
+plot([8 8], ylim, 'r--', 'LineWidth', 2, 'HandleVisibility', 'off');
+text(8, max(ylim)*0.9, ' 8 Hz', 'FontSize', 10, 'Color', 'r', 'FontWeight', 'bold');
+xlabel('Frequency (Hz)', 'FontSize', 11);
+ylabel('Mean Vector Length', 'FontSize', 11);
+title('Reward (All Periods)', 'FontSize', 12, 'FontWeight', 'bold');
+legend('Location', 'best', 'FontSize', 9);
+grid on; box on;
+xlim([0 20]);
+
+saveas(fig3, fullfile(output_dir, 'Figure3_Mean_Vector_Length_Spectrum.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
+%  FIGURE 4: 8 Hz DETAILED ANALYSIS
+%  ========================================================================
+
+fprintf('Creating Figure 4: 8 Hz Detailed Analysis...\n');
+
+fig4 = figure('Position', [200, 200, 1800, 1000]);
+sgtitle('8 Hz Band: Detailed Phase-Locking Analysis', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Panel 1: Average FTA curves
+subplot(2, 3, 1);
+plot_8hz_average_fta(data_8hz, phase_centers, color_aversive, color_reward);
+
+% Panel 2: Mean vector length comparison
+subplot(2, 3, 2);
+plot_8hz_mvl_comparison(data_8hz, color_aversive, color_reward);
+
+% Panel 3: Preferred phase distribution (aversive)
+subplot(2, 3, 3);
+plot_preferred_phase_distribution(data_8hz(data_8hz.SessionType == 'Aversive', :), color_aversive, 'Aversive');
+
+% Panel 4: Preferred phase distribution (reward)
+subplot(2, 3, 4);
+plot_preferred_phase_distribution(data_8hz(data_8hz.SessionType == 'Reward', :), color_reward, 'Reward');
+
+% Panel 5: MVL histogram (aversive)
+subplot(2, 3, 5);
+histogram(data_8hz.Mean_Vector_Length(data_8hz.SessionType == 'Aversive'), 20, ...
+          'FaceColor', color_aversive, 'EdgeColor', 'k', 'FaceAlpha', 0.7);
+xlabel('Mean Vector Length', 'FontSize', 11);
+ylabel('Count', 'FontSize', 11);
+title('Aversive: MVL Distribution', 'FontSize', 12, 'FontWeight', 'bold');
+grid on; box on;
+
+% Panel 6: MVL histogram (reward)
+subplot(2, 3, 6);
+histogram(data_8hz.Mean_Vector_Length(data_8hz.SessionType == 'Reward'), 20, ...
+          'FaceColor', color_reward, 'EdgeColor', 'k', 'FaceAlpha', 0.7);
+xlabel('Mean Vector Length', 'FontSize', 11);
+ylabel('Count', 'FontSize', 11);
+title('Reward: MVL Distribution', 'FontSize', 12, 'FontWeight', 'bold');
+grid on; box on;
+
+saveas(fig4, fullfile(output_dir, 'Figure4_8Hz_Detailed_Analysis.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
+%  COMPLETION
+%  ========================================================================
+
+fprintf('\n========================================\n');
+fprintf('FIELD-TRIGGERED AVERAGE VISUALIZATION COMPLETE!\n');
+fprintf('========================================\n');
+fprintf('Figures saved to: %s/\n', output_dir);
+fprintf('\nInterpretation:\n');
+fprintf('  - Peaked FTA curve → Strong phase-locking (high MVL)\n');
+fprintf('  - Flat FTA curve → No phase preference (low MVL)\n');
+fprintf('  - MVL spectrum similar to PPC (both measure phase-locking)\n');
+fprintf('  - Low MVL at 8 Hz → Confirms low phase-locking despite high SFC\n');
+fprintf('========================================\n');
+
+
+%% ========================================================================
+%  HELPER FUNCTIONS
+%  ========================================================================
+
+function plot_fta_cartesian(data, phase_centers, color)
+% Plot FTA curve in Cartesian coordinates
+
+    % Average FTA curves across all entries
+    all_curves = cell2mat(data.FTA_Curve');
+    mean_fta = mean(all_curves, 1);
+    sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
+
+    hold on;
+    fill([phase_centers, fliplr(phase_centers)], ...
+         [mean_fta - sem_fta, fliplr(mean_fta + sem_fta)], ...
+         color, 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+    plot(phase_centers, mean_fta, 'Color', color, 'LineWidth', 2);
+
+    % Uniform expectation
+    uniform_level = 1 / length(phase_centers);
+    plot(xlim, [uniform_level uniform_level], 'k--', 'LineWidth', 1);
+
+    xlabel('Phase (rad)', 'FontSize', 11);
+    ylabel('Normalized Spike Rate', 'FontSize', 11);
+    grid on; box on;
+    xlim([-pi pi]);
+    set(gca, 'XTick', [-pi -pi/2 0 pi/2 pi], 'XTickLabel', {'-π', '-π/2', '0', 'π/2', 'π'});
+end
+
+function plot_fta_polar(data, phase_centers, color)
+% Plot FTA curve in polar coordinates
+
+    % Average FTA curves
+    all_curves = cell2mat(data.FTA_Curve');
+    mean_fta = mean(all_curves, 1);
+
+    % Plot in polar coordinates
+    hold on;
+    polarplot([phase_centers, phase_centers(1)], [mean_fta, mean_fta(1)], ...
+              'Color', color, 'LineWidth', 2);
+
+    % Uniform circle
+    uniform_level = 1 / length(phase_centers);
+    theta_circle = linspace(0, 2*pi, 100);
+    polarplot(theta_circle, uniform_level * ones(size(theta_circle)), 'k--', 'LineWidth', 1);
+
+    thetalim([-180 180]);
+end
+
+function plot_mvl_spectrum(data, unique_freqs, color)
+% Plot mean vector length spectrum
+
+    [mean_mvl, sem_mvl, freq_centers] = compute_frequency_average(data, unique_freqs, 'Mean_Vector_Length');
+
+    hold on;
+    errorbar(freq_centers, mean_mvl, sem_mvl, 'o-', 'Color', color, ...
+             'LineWidth', 2, 'MarkerSize', 6, 'MarkerFaceColor', color, 'CapSize', 4);
+
+    % Highlight 8 Hz
+    plot([8 8], ylim, 'r--', 'LineWidth', 2);
+    text(8, max(ylim)*0.9, ' 8 Hz', 'FontSize', 9, 'Color', 'r', 'FontWeight', 'bold');
+
+    xlabel('Frequency (Hz)', 'FontSize', 11);
+    ylabel('Mean Vector Length', 'FontSize', 11);
+    grid on; box on;
+    xlim([0 20]);
+    ylim([0 max(mean_mvl)*1.3]);
+end
+
+function [mean_vals, sem_vals, freq_centers] = compute_frequency_average(data, unique_freqs, variable_name)
+% Compute average and SEM across frequencies
+
+    n_freqs = length(unique_freqs);
+    mean_vals = zeros(1, n_freqs);
+    sem_vals = zeros(1, n_freqs);
+    freq_centers = unique_freqs;
+
+    for f = 1:n_freqs
+        freq = unique_freqs(f);
+        freq_mask = abs((data.Freq_Low_Hz + data.Freq_High_Hz)/2 - freq) < 0.1;
+        values = data.(variable_name)(freq_mask);
+
+        if ~isempty(values)
+            mean_vals(f) = mean(values, 'omitnan');
+            sem_vals(f) = std(values, 'omitnan') / sqrt(sum(~isnan(values)));
+        end
+    end
+end
+
+function plot_8hz_average_fta(data_8hz, phase_centers, color_aversive, color_reward)
+% Plot average FTA curves for aversive vs reward at 8 Hz
+
+    hold on;
+
+    % Aversive
+    aversive_data = data_8hz(data_8hz.SessionType == 'Aversive', :);
+    if ~isempty(aversive_data)
+        all_curves = cell2mat(aversive_data.FTA_Curve');
+        mean_fta = mean(all_curves, 1);
+        sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
+
+        fill([phase_centers, fliplr(phase_centers)], ...
+             [mean_fta - sem_fta, fliplr(mean_fta + sem_fta)], ...
+             color_aversive, 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+        plot(phase_centers, mean_fta, 'Color', color_aversive, 'LineWidth', 2, 'DisplayName', 'Aversive');
+    end
+
+    % Reward
+    reward_data = data_8hz(data_8hz.SessionType == 'Reward', :);
+    if ~isempty(reward_data)
+        all_curves = cell2mat(reward_data.FTA_Curve');
+        mean_fta = mean(all_curves, 1);
+        sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
+
+        fill([phase_centers, fliplr(phase_centers)], ...
+             [mean_fta - sem_fta, fliplr(mean_fta + sem_fta)], ...
+             color_reward, 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+        plot(phase_centers, mean_fta, 'Color', color_reward, 'LineWidth', 2, 'DisplayName', 'Reward');
+    end
+
+    % Uniform expectation
+    uniform_level = 1 / length(phase_centers);
+    plot(xlim, [uniform_level uniform_level], 'k--', 'LineWidth', 1, 'DisplayName', 'Uniform');
+
+    xlabel('Phase (rad)', 'FontSize', 12);
+    ylabel('Normalized Spike Rate', 'FontSize', 12);
+    title('Average FTA at 8 Hz', 'FontSize', 12, 'FontWeight', 'bold');
+    legend('Location', 'best', 'FontSize', 10);
+    grid on; box on;
+    xlim([-pi pi]);
+    set(gca, 'XTick', [-pi -pi/2 0 pi/2 pi], 'XTickLabel', {'-π', '-π/2', '0', 'π/2', 'π'});
+end
+
+function plot_8hz_mvl_comparison(data_8hz, color_aversive, color_reward)
+% Bar plot comparing MVL at 8 Hz
+
+    % Compute averages
+    aversive_mvl = data_8hz.Mean_Vector_Length(data_8hz.SessionType == 'Aversive');
+    reward_mvl = data_8hz.Mean_Vector_Length(data_8hz.SessionType == 'Reward');
+
+    mean_aversive = mean(aversive_mvl, 'omitnan');
+    mean_reward = mean(reward_mvl, 'omitnan');
+
+    sem_aversive = std(aversive_mvl, 'omitnan') / sqrt(sum(~isnan(aversive_mvl)));
+    sem_reward = std(reward_mvl, 'omitnan') / sqrt(sum(~isnan(reward_mvl)));
+
+    % Bar plot
+    hold on;
+    bar(1, mean_aversive, 'FaceColor', color_aversive, 'EdgeColor', 'k', 'LineWidth', 1.5);
+    bar(2, mean_reward, 'FaceColor', color_reward, 'EdgeColor', 'k', 'LineWidth', 1.5);
+
+    errorbar([1 2], [mean_aversive mean_reward], [sem_aversive sem_reward], ...
+             'k', 'LineStyle', 'none', 'LineWidth', 2, 'CapSize', 10);
+
+    set(gca, 'XTick', [1 2], 'XTickLabel', {'Aversive', 'Reward'});
+    ylabel('Mean Vector Length', 'FontSize', 12);
+    title('8 Hz: Phase-Locking Strength', 'FontSize', 12, 'FontWeight', 'bold');
+    grid on; box on;
+    xlim([0.5 2.5]);
+    ylim([0 max([mean_aversive, mean_reward]) * 1.3]);
+end
+
+function plot_preferred_phase_distribution(data, color, session_label)
+% Circular histogram of preferred phases
+
+    preferred_phases = data.Preferred_Phase;
+
+    % Create circular histogram
+    polarhistogram(preferred_phases, 18, 'FaceColor', color, 'EdgeColor', 'k', 'FaceAlpha', 0.7);
+
+    title(sprintf('%s: Preferred Phase', session_label), 'FontSize', 12, 'FontWeight', 'bold');
+    thetalim([-180 180]);
+end
