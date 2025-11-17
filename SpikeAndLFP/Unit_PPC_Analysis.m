@@ -180,13 +180,25 @@ for sess_idx = 1:num_aversive_sessions
     fprintf('  Processing %d frequency bands (0.1-20 Hz) - memory efficient mode...\n', n_bands);
 
     for band_idx = 1:n_bands
-        band_name = config.frequency_bands{band_idx, 1};
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
         band_range = config.frequency_bands{band_idx, 2};
 
         % Compute phase signal for THIS band only
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
         analytic_signal = hilbert(LFP_filtered);
-        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
+        phase_signals{band_idx} = angle(analytic_signal);  % Phase in radians [-π, π]
+
+    end
+    fprintf('  ✓ All phase signals computed\n');
+
+    % Process each unit
+    for unit_idx = 1:n_units
+        fprintf('    Processed %d/%d Units...\n', unit_idx, n_units);
+        spike_times = valid_spikes{unit_idx};
+
+        if isempty(spike_times)
+            continue;
+        end
 
         % Free up memory
         clear LFP_filtered analytic_signal;
@@ -286,32 +298,8 @@ fprintf('==== PROCESSING REWARD SESSIONS ====\n');
 
 n_valid_reward = 0;
 
-% Need to load aversive sessions to get time-matched periods
-fprintf('Loading aversive sessions for time-matching...\n');
-
-aversive_time_boundaries = {};
-for sess_idx = 1:num_aversive_sessions
-    Timelimits = 'No';
-    [NeuralTime, ~, ~, ~, ~, ~, ~, ~, AversiveSound, ~, ~, ~, TriggerMid] = ...
-        loadAndPrepareSessionData(allfiles_aversive(sess_idx), T_sorted, Timelimits);
-
-    aversive_onsets = find(diff(AversiveSound) == 1);
-    all_aversive_time = NeuralTime(aversive_onsets);
-
-    if length(all_aversive_time) >= 3
-        aversive_time_boundaries{sess_idx} = all_aversive_time(1:3)' - TriggerMid(1);
-    end
-end
-
-% Calculate average time boundaries
-all_boundaries = [];
-for i = 1:length(aversive_time_boundaries)
-    if ~isempty(aversive_time_boundaries{i})
-        all_boundaries = [all_boundaries; aversive_time_boundaries{i}];
-    end
-end
-avg_time_boundaries = mean(all_boundaries, 1);
-fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] sec\n\n', avg_time_boundaries);
+avg_time_boundaries = [0, 8*60, 16*60, 24*60, 30*60];
+fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] seconds\n', avg_time_boundaries);
 
 % Process reward sessions
 for sess_idx = 1:num_reward_sessions
@@ -332,9 +320,7 @@ for sess_idx = 1:num_reward_sessions
     spike_filename = allfiles_reward(sess_idx).name;
 
     % Define 4 period boundaries using time-matched approach
-    period_boundaries = [TriggerMid(1), ...
-                         avg_time_boundaries + TriggerMid(1), ...
-                         TriggerMid(end)];
+    period_boundaries = [avg_time_boundaries + TriggerMid(1)];
 
     n_periods = 4;
     n_units = length(valid_spikes);
@@ -528,14 +514,13 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
     if low_freq < 1
         % Remove DC offset and slow drift
         LFP_detrend = detrend(LFP);           % Remove linear trend
-        LFP_demean = LFP_detrend - mean(LFP_detrend);  % Remove mean
 
         % Apply lowpass filter (much faster than bandpass with low cutoff)
         if high_freq < Fs/2
-            LFP_filtered = lowpass(LFP_demean, high_freq, Fs, ...
+            LFP_filtered = lowpass(LFP_detrend, high_freq, Fs, ...
                 'ImpulseResponse', 'fir', 'Steepness', 0.85);
         else
-            LFP_filtered = LFP_demean;  % Already detrended/demeaned
+            LFP_filtered = LFP_detrend;  % Already detrended/demeaned
         end
     else
         % For higher frequencies: standard bandpass filtering

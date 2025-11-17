@@ -1,0 +1,38 @@
+========================================
+UNIT FEATURES ANALYSIS - SUMMARY STATISTICS
+========================================
+
+Data file: Unit_features_analysis_16-Nov-2025.mat
+Generated: 16-Nov-2025 19:41:34
+
+Dataset Overview:
+  Total data points: 5674
+  Aversive sessions: 26 (7 periods each)
+  Reward sessions: 26 (4 periods each)
+  Total units analyzed: 1042
+
+Metrics Summary:
+  Total metrics: 22
+
+--- Aversive Sessions ---
+Periods: 7
+Data points: 3514
+
+Key Metrics (mean ± std):
+  FR: 6.47 ± 10.55 Hz
+  CV: 1.32 ± 0.58
+  ISI_FanoFactor: 2.67 ± 8.76
+  BurstIndex: 0.043 ± 0.077
+  RefracViolations: 0.01 ± 0.05 %
+
+--- Reward Sessions ---
+Periods: 4
+Data points: 2160
+
+Key Metrics (mean ± std):
+  FR: 7.23 ± 11.38 Hz
+  CV: 1.35 ± 0.58
+  ISI_FanoFactor: 2.81 ± 10.49
+  BurstIndex: 0.053 ± 0.083
+  RefracViolations: 0.01 ± 0.03 %
+
