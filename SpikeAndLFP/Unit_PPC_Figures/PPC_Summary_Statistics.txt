@@ -1,0 +1,35 @@
+========================================
+UNIT PPC ANALYSIS - SUMMARY STATISTICS
+========================================
+
+Generated: 17-Nov-2025 17:28:46
+
+Dataset Overview:
+  Total data points: 107236
+  Aversive sessions: 26
+  Reward sessions: 26
+  Frequency bands: 19 (1 Hz resolution)
+  Frequency range: 0.1 - 19.0 Hz
+
+--- Aversive Sessions ---
+Data points: 66405
+Mean PPC: 0.0007 ± 0.0079
+Median PPC: -0.0000
+Max PPC: 0.2939
+
+PPC by Frequency Band:
+  Delta (1-4 Hz): 0.0009 ± 0.0082
+  Theta (5-12 Hz): 0.0006 ± 0.0073
+  Beta (15-30 Hz): 0.0001 ± 0.0061
+
+--- Reward Sessions ---
+Data points: 40831
+Mean PPC: 0.0009 ± 0.0104
+Median PPC: -0.0000
+Max PPC: 0.4586
+
+PPC by Frequency Band:
+  Delta (1-4 Hz): 0.0013 ± 0.0103
+  Theta (5-12 Hz): 0.0003 ± 0.0079
+  Beta (15-30 Hz): 0.0002 ± 0.0075
+

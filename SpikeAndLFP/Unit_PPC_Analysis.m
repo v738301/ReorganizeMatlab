@@ -133,15 +133,16 @@ for sess_idx = 1:num_aversive_sessions
     % Preprocess LFP
     [filtered_data] = preprocessSignals(Signal, Fs, config.bp_range);
     bestChannel = findBestLFPChannel(filtered_data, Fs);
-    LFP = filtered_data(:, bestChannel);
+    LFP = Signal(:, bestChannel);
+    clear filtered_data Signal
 
     n_valid_aversive = n_valid_aversive + 1;
     spike_filename = allfiles_aversive(sess_idx).name;
 
     % Define 7 period boundaries using 6 noises
     period_boundaries = [TriggerMid(1), ...
-                         all_aversive_time(1:6)' + TriggerMid(1), ...
-                         TriggerMid(end)];
+        all_aversive_time(1:6)' + TriggerMid(1), ...
+        TriggerMid(end)];
 
     n_periods = 7;
     n_units = length(valid_spikes);
@@ -190,12 +191,11 @@ for sess_idx = 1:num_aversive_sessions
                           'PPC', 'Preferred_Phase_rad', 'PPC_CI_lower', 'PPC_CI_upper', 'N_spikes', 'Reliability'});
     row = 0;
 
-    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
-    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
-    % on-demand and clear it before the next band (only ~150 MB at a time)
-    fprintf('  Processing %d frequency bands (0.1-20 Hz) - optimized mode...\n', n_bands);
+
+    fprintf(['  Processing %d frequency bands (0.1-20 Hz) \n'], n_bands);
 
     for band_idx = 1:n_bands
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
         band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
@@ -209,205 +209,7 @@ for sess_idx = 1:num_aversive_sessions
 
         % Process each unit for this band
         for unit_idx = 1:n_units
-            spike_times = valid_spikes{unit_idx};
-
-            if isempty(spike_times)
-                continue;
-            end
-
-            % Process each period for this unit
-            for period_idx = 1:n_periods
-                period_start = period_boundaries(period_idx);
-                period_end = period_boundaries(period_idx + 1);
-                period_duration = period_end - period_start;
-
-                % Extract spikes in this period
-                spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
-                n_spikes = length(spikes_in_period);
-
-                % Skip if too few spikes
-                if n_spikes < config.min_spikes
-                    continue;
-                end
-
-                % Convert spike times to indices using pre-computed function
-                spike_indices = arrayfun(spikeIdx, spikes_in_period);
-
-                % Extract spike phases for this band
-                spike_phases = phase_signal(spike_indices);
-
-                % Calculate PPC and statistics
-                [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = ...
-                    calculate_PPC_with_CI(spike_phases, config.bootstrap_samples, config.ci_level);
-
-                % Determine reliability based on spike count
-                reliability = determine_reliability(n_spikes);
-
-                % Store data in pre-allocated table (much faster than end+1)
-                row = row + 1;
-                session_tbl.Unit(row) = unit_idx;
-                session_tbl.Period(row) = period_idx;
-                session_tbl.Band(row) = band_name;
-                session_tbl.Freq_Low_Hz(row) = band_range(1);
-                session_tbl.Freq_High_Hz(row) = band_range(2);
-                session_tbl.Period_Duration_sec(row) = period_duration;
-                session_tbl.PPC(row) = PPC;
-                session_tbl.Preferred_Phase_rad(row) = preferred_phase;
-                session_tbl.PPC_CI_lower(row) = PPC_CI_lower;
-                session_tbl.PPC_CI_upper(row) = PPC_CI_upper;
-                session_tbl.N_spikes(row) = n_spikes;
-                session_tbl.Reliability(row) = reliability;
-            end
-        end
-
-        % Clear phase signal before next band (free memory)
-        clear phase_signal;
-
-        if mod(band_idx, 5) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
-    end
-    fprintf('  ✓ All bands processed\n');
-
-    % Store table in session results (variable names already set during pre-allocation)
-    session_results.data = session_tbl;
-
-    % Save session results
-    [~, base_filename, ~] = fileparts(spike_filename);
-    save_filename = fullfile(RewardAversivePath, sprintf('%s_unit_ppc.mat', base_filename));
-    save(save_filename, 'session_results', 'config', '-v7.3');
-
-    elapsed = toc;
-    fprintf('  ✓ Session %d complete (%.1f sec). Saved: %s\n', n_valid_aversive, elapsed, save_filename);
-end
-
-fprintf('\n✓ Processed %d aversive sessions\n', n_valid_aversive);
-fprintf('  Results saved to: %s\n\n', RewardAversivePath);
-
-%% ========================================================================
-%  SECTION 5: PROCESS REWARD SESSIONS
-%  ========================================================================
-
-fprintf('==== PROCESSING REWARD SESSIONS ====\n');
-
-n_valid_reward = 0;
-
-% Need to load aversive sessions to get time-matched periods
-fprintf('Loading aversive sessions for time-matching...\n');
-
-aversive_time_boundaries = {};
-for sess_idx = 1:num_aversive_sessions
-    Timelimits = 'No';
-    [NeuralTime, ~, ~, ~, ~, ~, ~, ~, AversiveSound, ~, ~, ~, TriggerMid] = ...
-        loadAndPrepareSessionData(allfiles_aversive(sess_idx), T_sorted, Timelimits);
-
-    aversive_onsets = find(diff(AversiveSound) == 1);
-    all_aversive_time = NeuralTime(aversive_onsets);
-
-    if length(all_aversive_time) >= 3
-        aversive_time_boundaries{sess_idx} = all_aversive_time(1:3)' - TriggerMid(1);
-    end
-end
-
-% Calculate average time boundaries
-all_boundaries = [];
-for i = 1:length(aversive_time_boundaries)
-    if ~isempty(aversive_time_boundaries{i})
-        all_boundaries = [all_boundaries; aversive_time_boundaries{i}];
-    end
-end
-avg_time_boundaries = mean(all_boundaries, 1);
-fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] sec\n\n', avg_time_boundaries);
-
-% Process reward sessions
-for sess_idx = 1:num_reward_sessions
-    fprintf('\n[%d/%d] Processing: %s\n', sess_idx, num_reward_sessions, allfiles_reward(sess_idx).name);
-    tic;
-
-    % Load raw spike data
-    Timelimits = 'No';
-    [NeuralTime, ~, ~, Signal, ~, ~, ~, ~, ~, ~, valid_spikes, Fs, TriggerMid] = ...
-        loadAndPrepareSessionData(allfiles_reward(sess_idx), T_sorted, Timelimits);
-
-    % Preprocess LFP
-    [filtered_data] = preprocessSignals(Signal, Fs, config.bp_range);
-    bestChannel = findBestLFPChannel(filtered_data, Fs);
-    LFP = filtered_data(:, bestChannel);
-
-    n_valid_reward = n_valid_reward + 1;
-    spike_filename = allfiles_reward(sess_idx).name;
-
-    % Define 4 period boundaries using time-matched approach
-    period_boundaries = [TriggerMid(1), ...
-                         avg_time_boundaries + TriggerMid(1), ...
-                         TriggerMid(end)];
-
-    n_periods = 4;
-    n_units = length(valid_spikes);
-
-    fprintf('  LFP channel: %d, Units: %d, Periods: %d, Fs: %.0f Hz\n', bestChannel, n_units, n_periods, Fs);
-
-    % Initialize session results storage
-    session_results = struct();
-    session_results.session_id = n_valid_reward;
-    session_results.filename = spike_filename;
-    session_results.session_type = 'RewardSeeking';
-    session_results.best_channel = bestChannel;
-    session_results.Fs = Fs;
-    session_results.n_units = n_units;
-    session_results.n_periods = n_periods;
-    session_results.period_boundaries = period_boundaries;
-
-    % PERFORMANCE OPTIMIZATION 1: Pre-compute time→index mapping
-    % Avoid repeated interp1 calls (very slow for many spikes)
-    t0 = NeuralTime(1);
-    dt = median(diff(NeuralTime));
-    spikeIdx = @(t) max(1, min(length(NeuralTime), round((t - t0) / dt) + 1));
-
-    % PERFORMANCE OPTIMIZATION 2: Count rows and pre-allocate table
-    % Avoid dynamic growth with end+1 (causes repeated memory reallocation)
-    fprintf('  Counting valid unit-period combinations...\n');
-    nRows = 0;
-    for u = 1:n_units
-        st = valid_spikes{u};
-        if isempty(st), continue; end
-        for p = 1:n_periods
-            sp = st(st >= period_boundaries(p) & st < period_boundaries(p + 1));
-            if numel(sp) >= config.min_spikes
-                nRows = nRows + 1;
-            end
-        end
-    end
-    nRows = nRows * n_bands;
-    fprintf('  Pre-allocating table for %d rows...\n', nRows);
-
-    % Pre-allocate table with exact size
-    session_tbl = table('Size', [nRows, 12], ...
-        'VariableTypes', {'uint16', 'uint8', 'string', 'double', 'double', 'double', ...
-                          'double', 'double', 'double', 'double', 'uint32', 'string'}, ...
-        'VariableNames', {'Unit', 'Period', 'Band', 'Freq_Low_Hz', 'Freq_High_Hz', 'Period_Duration_sec', ...
-                          'PPC', 'Preferred_Phase_rad', 'PPC_CI_lower', 'PPC_CI_upper', 'N_spikes', 'Reliability'});
-    row = 0;
-
-    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
-    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
-    % on-demand and clear it before the next band (only ~150 MB at a time)
-    fprintf('  Processing %d frequency bands (0.1-20 Hz) - optimized mode...\n', n_bands);
-
-    for band_idx = 1:n_bands
-        band_name = config.frequency_bands{band_idx, 1};
-        band_range = config.frequency_bands{band_idx, 2};
-
-        % Compute phase signal for THIS band only
-        LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
-        analytic_signal = hilbert(LFP_filtered);
-        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
-
-        % Free up memory
-        clear LFP_filtered analytic_signal;
-
-        % Process each unit for this band
-        for unit_idx = 1:n_units
+            fprintf('    Processed %d/%d Unit...\n', unit_idx, n_units);
             spike_times = valid_spikes{unit_idx};
 
             if isempty(spike_times)
@@ -462,9 +264,176 @@ for sess_idx = 1:num_reward_sessions
         % Clear phase signal before next band (free memory)
         clear phase_signal;
 
-        if mod(band_idx, 5) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+    end
+    fprintf('  ✓ All bands processed\n');
+
+    % Store table in session results (variable names already set during pre-allocation)
+    session_results.data = session_tbl;
+
+    % Save session results
+    [~, base_filename, ~] = fileparts(spike_filename);
+    save_filename = fullfile(RewardAversivePath, sprintf('%s_unit_ppc.mat', base_filename));
+    save(save_filename, 'session_results', 'config', '-v7.3');
+
+    elapsed = toc;
+    fprintf('  ✓ Session %d complete (%.1f sec). Saved: %s\n', n_valid_aversive, elapsed, save_filename);
+end
+
+fprintf('\n✓ Processed %d aversive sessions\n', n_valid_aversive);
+fprintf('  Results saved to: %s\n\n', RewardAversivePath);
+
+%% ========================================================================
+%  SECTION 5: PROCESS REWARD SESSIONS
+%  ========================================================================
+
+fprintf('==== PROCESSING REWARD SESSIONS ====\n');
+
+n_valid_reward = 0;
+
+avg_time_boundaries = [0, 8*60, 16*60, 24*60, 30*60];
+fprintf('  Average time boundaries: [%.1f, %.1f, %.1f] seconds\n', avg_time_boundaries);
+
+% Process reward sessions
+for sess_idx = 1:num_reward_sessions
+    fprintf('\n[%d/%d] Processing: %s\n', sess_idx, num_reward_sessions, allfiles_reward(sess_idx).name);
+    tic;
+
+    % Load raw spike data
+    Timelimits = 'No';
+    [NeuralTime, ~, ~, Signal, ~, ~, ~, ~, ~, ~, valid_spikes, Fs, TriggerMid] = ...
+        loadAndPrepareSessionData(allfiles_reward(sess_idx), T_sorted, Timelimits);
+
+    % Preprocess LFP
+    [filtered_data] = preprocessSignals(Signal, Fs, config.bp_range);
+    bestChannel = findBestLFPChannel(filtered_data, Fs);
+    LFP = Signal(:, bestChannel);
+    clear filtered_data Signal
+
+    n_valid_reward = n_valid_reward + 1;
+    spike_filename = allfiles_reward(sess_idx).name;
+
+    % Define 4 period boundaries using time-matched approach
+    period_boundaries = [avg_time_boundaries + TriggerMid(1)];
+
+    n_periods = 4;
+    n_units = length(valid_spikes);
+
+    fprintf('  LFP channel: %d, Units: %d, Periods: %d, Fs: %.0f Hz\n', bestChannel, n_units, n_periods, Fs);
+
+    % Initialize session results storage
+    session_results = struct();
+    session_results.session_id = n_valid_reward;
+    session_results.filename = spike_filename;
+    session_results.session_type = 'RewardSeeking';
+    session_results.best_channel = bestChannel;
+    session_results.Fs = Fs;
+    session_results.n_units = n_units;
+    session_results.n_periods = n_periods;
+    session_results.period_boundaries = period_boundaries;
+
+    % PERFORMANCE OPTIMIZATION 1: Pre-compute time→index mapping
+    % Avoid repeated interp1 calls (very slow for many spikes)
+    t0 = NeuralTime(1);
+    dt = median(diff(NeuralTime));
+    spikeIdx = @(t) max(1, min(length(NeuralTime), round((t - t0) / dt) + 1));
+
+    % PERFORMANCE OPTIMIZATION 2: Count rows and pre-allocate table
+    % Avoid dynamic growth with end+1 (causes repeated memory reallocation)
+    fprintf('  Counting valid unit-period combinations...\n');
+    nRows = 0;
+    for u = 1:n_units
+        st = valid_spikes{u};
+        if isempty(st), continue; end
+        for p = 1:n_periods
+            sp = st(st >= period_boundaries(p) & st < period_boundaries(p + 1));
+            if numel(sp) >= config.min_spikes
+                nRows = nRows + 1;
+            end
         end
+    end
+    nRows = nRows * n_bands;
+    fprintf('  Pre-allocating table for %d rows...\n', nRows);
+
+    % Pre-allocate table with exact size
+    session_tbl = table('Size', [nRows, 12], ...
+        'VariableTypes', {'uint16', 'uint8', 'string', 'double', 'double', 'double', ...
+                          'double', 'double', 'double', 'double', 'uint32', 'string'}, ...
+        'VariableNames', {'Unit', 'Period', 'Band', 'Freq_Low_Hz', 'Freq_High_Hz', 'Period_Duration_sec', ...
+                          'PPC', 'Preferred_Phase_rad', 'PPC_CI_lower', 'PPC_CI_upper', 'N_spikes', 'Reliability'});
+    row = 0;
+
+    fprintf('  Processing %d frequency bands (0.1-20 Hz) \n', n_bands);
+
+    for band_idx = 1:n_bands
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        band_name = config.frequency_bands{band_idx, 1};
+        band_range = config.frequency_bands{band_idx, 2};
+
+        % Compute phase signal for THIS band only
+        LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
+        analytic_signal = hilbert(LFP_filtered);
+        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
+
+        % Free up memory
+        clear LFP_filtered analytic_signal;
+
+        % Process each unit for this band
+        for unit_idx = 1:n_units
+            fprintf('    Processed %d/%d Unit...\n', unit_idx, n_units);
+            spike_times = valid_spikes{unit_idx};
+
+            if isempty(spike_times)
+                continue;
+            end
+
+            % Process each period for this unit
+            for period_idx = 1:n_periods
+                period_start = period_boundaries(period_idx);
+                period_end = period_boundaries(period_idx + 1);
+                period_duration = period_end - period_start;
+
+                % Extract spikes in this period
+                spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
+                n_spikes = length(spikes_in_period);
+
+                % Skip if too few spikes
+                if n_spikes < config.min_spikes
+                    continue;
+                end
+
+                % Convert spike times to indices using pre-computed function
+                spike_indices = arrayfun(spikeIdx, spikes_in_period);
+
+                % Extract spike phases for this band
+                spike_phases = phase_signal(spike_indices);
+
+                % Calculate PPC and statistics
+                [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = ...
+                    calculate_PPC_with_CI(spike_phases, config.bootstrap_samples, config.ci_level);
+
+                % Determine reliability
+                reliability = determine_reliability(n_spikes);
+
+                % Store data in pre-allocated table (much faster than end+1)
+                row = row + 1;
+                session_tbl.Unit(row) = unit_idx;
+                session_tbl.Period(row) = period_idx;
+                session_tbl.Band(row) = band_name;
+                session_tbl.Freq_Low_Hz(row) = band_range(1);
+                session_tbl.Freq_High_Hz(row) = band_range(2);
+                session_tbl.Period_Duration_sec(row) = period_duration;
+                session_tbl.PPC(row) = PPC;
+                session_tbl.Preferred_Phase_rad(row) = preferred_phase;
+                session_tbl.PPC_CI_lower(row) = PPC_CI_lower;
+                session_tbl.PPC_CI_upper(row) = PPC_CI_upper;
+                session_tbl.N_spikes(row) = n_spikes;
+                session_tbl.Reliability(row) = reliability;
+            end
+        end
+
+        % Clear phase signal before next band (free memory)
+        clear phase_signal;
+        
     end
     fprintf('  ✓ All bands processed\n');
 
@@ -533,70 +502,83 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
 % OUTPUTS:
 %   LFP_filtered - Filtered LFP signal
 
-    low_freq = band_range(1);
-    high_freq = band_range(2);
+low_freq = band_range(1);
+high_freq = band_range(2);
 
-    % For very low frequency bands (<1 Hz): optimize by detrending + lowpass
-    if low_freq < 1
-        % Remove DC offset and slow drift
-        LFP_detrend = detrend(LFP);           % Remove linear trend
-        LFP_demean = LFP_detrend - mean(LFP_detrend);  % Remove mean
+% For very low frequency bands (<1 Hz): optimize by detrending + lowpass
+if low_freq < 1
+    % Remove DC offset and slow drift
+    LFP_detrend = detrend(LFP);           % Remove linear trend
 
-        % Apply lowpass filter (much faster than bandpass with low cutoff)
-        if high_freq < Fs/2
-            LFP_filtered = lowpass(LFP_demean, high_freq, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        else
-            LFP_filtered = LFP_demean;  % Already detrended/demeaned
-        end
+    % Apply lowpass filter (much faster than bandpass with low cutoff)
+    if high_freq < Fs/2
+        LFP_filtered = lowpass(LFP_detrend, high_freq, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
     else
-        % For higher frequencies: standard bandpass filtering
-        if high_freq < Fs/2
-            LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        else
-            % High-pass only if high_freq exceeds Nyquist
-            LFP_filtered = highpass(LFP, low_freq, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        end
+        LFP_filtered = LFP_detrend;  % Already detrended/demeaned
+    end
+else
+    % For higher frequencies: standard bandpass filtering
+    if high_freq < Fs/2
+        LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+    else
+        % High-pass only if high_freq exceeds Nyquist
+        LFP_filtered = highpass(LFP, low_freq, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
     end
 end
+end
 
-function PPC = calculate_PPC(phases)
-% Calculate Pairwise Phase Consistency (PPC) - MEMORY EFFICIENT
+function ppc = calculate_PPC(phases, varargin)
+% CALCULATE_PPC  Three equivalent ways to compute bias-free PPC (Vinck 2010)
 %
-% PPC is an unbiased measure of phase-locking strength that is not
-% inflated by spike count (unlike MRL).
+%   ppc = calculate_PPC(phases)           % default: fastest complex version
+%   ppc = calculate_PPC(phases,'method','cosdiff')   % explicit cos(phi_i-phi_j)
 %
-% Formula: PPC = (2 / (N * (N-1))) * Σ_i Σ_{j>i} cos(φ_i - φ_j)
+%   All three return *exactly* the same number (within floating-point error)
 %
-% Memory-efficient implementation using complex exponentials:
-% PPC = (|Σ exp(1j*φ)|² - N) / (N*(N-1))
-%
-% This avoids creating N×N matrices which cause crashes for units with
-% many spikes (e.g., 10,000 spikes → 800 MB for one matrix!)
-%
-% INPUTS:
-%   phases - Nx1 vector of phase angles in radians
-%
-% OUTPUTS:
-%   PPC - Pairwise Phase Consistency
-%         Range: [-1/(N-1), 1]
-%         - Values near 0: no phase consistency (uniform distribution)
-%         - Values near 1: strong phase consistency
-%         - Negative values (near 0): possible for small N, indicate no locking
-%         - For large N, range approaches [0, 1]
+%   References:
+%     Vinck et al., NeuroImage 51(1):112-122, 2010 → Eq. 14 (cos-diff version)
+%     Same paper → Eq. 13 & population PPC = PLV² → leads to complex version
 
-    N = length(phases);
+ip = inputParser;
+ip.addParameter('method','complex',@(x) any(validatestring(x,{'complex','cosdiff','plv'})));
+ip.parse(varargin{:});
+method = ip.Results.method;
 
-    if N < 2
-        PPC = NaN;
-        return;
-    end
+phases = phases(:);
+N = numel(phases);
+if N < 2
+    ppc = NaN;
+    return;
+end
 
-    % Memory-efficient calculation using complex exponentials
-    z = exp(1j * phases);
-    PPC = (abs(sum(z))^2 - N) / (N * (N - 1));
+switch lower(method)
+    case 'complex'   % Fastest, cleanest, most common (gold standard 2020–2025)
+        % |sum exp(iφ_k)|² - N  /  [N(N-1)]
+        z = exp(1j * phases);
+        ppc = (abs(sum(z))^2 - N) / (N*(N-1));
+
+    case 'cosdiff'   % Explicit cos(phi_i - phi_j) version — Eq. 14 in Vinck 2010
+        % Σ_{i<j} cos(phi_i - phi_j)  →  then multiply by 2/[N(N-1)]
+        % This is the version printed in the paper (page 114, Eq. 14)
+        total = 0;
+        for i = 1:N-1
+            delta = phases(i) - phases(i+1:end);   % phi_i - phi_j for all j>i
+            total = total + sum(cos(delta));
+        end
+        ppc = 2 * total / (N*(N-1));
+
+    case 'plv'       % Eq. 4 from many papers (N/(N-1)*(PLV² - 1/N))
+        % Very common in reviews and methods sections
+        plv = abs(mean(exp(1j*phases)));
+        ppc = (N/(N-1)) * (plv.^2 - 1/N);
+
+    otherwise
+        error('Unknown method');
+end
+
 end
 
 function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with_CI(phases, n_bootstrap, ci_level)
@@ -613,44 +595,44 @@ function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with
 %   PPC_CI_lower  - Lower bound of CI (NaN if bootstrap disabled)
 %   PPC_CI_upper  - Upper bound of CI (NaN if bootstrap disabled)
 
-    N = length(phases);
+N = length(phases);
 
-    if N < 2
-        PPC = NaN;
-        preferred_phase = NaN;
-        PPC_CI_lower = NaN;
-        PPC_CI_upper = NaN;
-        return;
+if N < 2
+    PPC = NaN;
+    preferred_phase = NaN;
+    PPC_CI_lower = NaN;
+    PPC_CI_upper = NaN;
+    return;
+end
+
+% Calculate PPC
+PPC = calculate_PPC(phases);
+
+% Calculate preferred phase (circular mean)
+mean_x = mean(cos(phases));
+mean_y = mean(sin(phases));
+preferred_phase = atan2(mean_y, mean_x);
+
+% Bootstrap confidence intervals for PPC (if enabled)
+if n_bootstrap > 0 && N >= 10
+    bootstrap_PPC = zeros(n_bootstrap, 1);
+
+    for b = 1:n_bootstrap
+        % Resample with replacement
+        boot_indices = randi(N, N, 1);
+        boot_phases = phases(boot_indices);
+        bootstrap_PPC(b) = calculate_PPC(boot_phases);
     end
 
-    % Calculate PPC
-    PPC = calculate_PPC(phases);
-
-    % Calculate preferred phase (circular mean)
-    mean_x = mean(cos(phases));
-    mean_y = mean(sin(phases));
-    preferred_phase = atan2(mean_y, mean_x);
-
-    % Bootstrap confidence intervals for PPC (if enabled)
-    if n_bootstrap > 0 && N >= 10
-        bootstrap_PPC = zeros(n_bootstrap, 1);
-
-        for b = 1:n_bootstrap
-            % Resample with replacement
-            boot_indices = randi(N, N, 1);
-            boot_phases = phases(boot_indices);
-            bootstrap_PPC(b) = calculate_PPC(boot_phases);
-        end
-
-        % Calculate confidence intervals
-        alpha = 1 - ci_level;
-        PPC_CI_lower = prctile(bootstrap_PPC, 100 * alpha / 2);
-        PPC_CI_upper = prctile(bootstrap_PPC, 100 * (1 - alpha / 2));
-    else
-        % Bootstrap disabled - fill with NaN
-        PPC_CI_lower = NaN;
-        PPC_CI_upper = NaN;
-    end
+    % Calculate confidence intervals
+    alpha = 1 - ci_level;
+    PPC_CI_lower = prctile(bootstrap_PPC, 100 * alpha / 2);
+    PPC_CI_upper = prctile(bootstrap_PPC, 100 * (1 - alpha / 2));
+else
+    % Bootstrap disabled - fill with NaN
+    PPC_CI_lower = NaN;
+    PPC_CI_upper = NaN;
+end
 end
 
 function reliability = determine_reliability(n_spikes)
@@ -662,15 +644,15 @@ function reliability = determine_reliability(n_spikes)
 % OUTPUTS:
 %   reliability - String: 'very_low', 'low', 'moderate', 'good', 'excellent'
 
-    if n_spikes < 10
-        reliability = 'very_low';
-    elseif n_spikes < 50
-        reliability = 'low';
-    elseif n_spikes < 100
-        reliability = 'moderate';
-    elseif n_spikes < 500
-        reliability = 'good';
-    else
-        reliability = 'excellent';
-    end
+if n_spikes < 10
+    reliability = 'very_low';
+elseif n_spikes < 50
+    reliability = 'low';
+elseif n_spikes < 100
+    reliability = 'moderate';
+elseif n_spikes < 500
+    reliability = 'good';
+else
+    reliability = 'excellent';
+end
 end
