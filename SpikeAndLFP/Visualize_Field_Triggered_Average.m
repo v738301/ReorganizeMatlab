@@ -267,7 +267,7 @@ function plot_fta_cartesian(data, phase_centers, color)
 % Plot FTA curve in Cartesian coordinates
 
     % Average FTA curves across all entries
-    all_curves = cell2mat(data.FTA_Curve');
+    all_curves = cell2mat(data.FTA_Curve);
     mean_fta = mean(all_curves, 1);
     sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 
@@ -292,7 +292,7 @@ function plot_fta_polar(data, phase_centers, color)
 % Plot FTA curve in polar coordinates
 
     % Average FTA curves
-    all_curves = cell2mat(data.FTA_Curve');
+    all_curves = cell2mat(data.FTA_Curve);
     mean_fta = mean(all_curves, 1);
 
     % Plot in polar coordinates
@@ -356,7 +356,7 @@ function plot_8hz_average_fta(data_8hz, phase_centers, color_aversive, color_rew
     % Aversive
     aversive_data = data_8hz(data_8hz.SessionType == 'Aversive', :);
     if ~isempty(aversive_data)
-        all_curves = cell2mat(aversive_data.FTA_Curve');
+        all_curves = cell2mat(aversive_data.FTA_Curve);
         mean_fta = mean(all_curves, 1);
         sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 
@@ -369,7 +369,7 @@ function plot_8hz_average_fta(data_8hz, phase_centers, color_aversive, color_rew
     % Reward
     reward_data = data_8hz(data_8hz.SessionType == 'Reward', :);
     if ~isempty(reward_data)
-        all_curves = cell2mat(reward_data.FTA_Curve');
+        all_curves = cell2mat(reward_data.FTA_Curve);
         mean_fta = mean(all_curves, 1);
         sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 

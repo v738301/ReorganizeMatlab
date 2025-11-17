@@ -85,10 +85,10 @@ sgtitle('Spike Rate vs LFP Amplitude: Pearson Correlation (Linear Coupling)', 'F
 % Get frequency centers
 freq_centers = (tbl.Freq_Low_Hz + tbl.Freq_High_Hz) / 2;
 unique_freqs = unique(freq_centers);
-
+ax = [];
 % Aversive (7 periods)
 for p = 1:7
-    subplot(2, 4, p);
+    ax(end+1) = subplot(2, 4, p);
     aversive_data = tbl(tbl.SessionType == 'Aversive' & tbl.Period == p, :);
 
     if ~isempty(aversive_data)
@@ -98,6 +98,8 @@ for p = 1:7
         if p >= 5, xlabel('Frequency (Hz)', 'FontSize', 11); end
     end
 end
+linkaxes(ax,'xy')
+ylim([-6e-3,6e-3])
 
 % Reward (4 periods)
 subplot(2, 4, 8);
@@ -121,6 +123,7 @@ title('Reward (All Periods)', 'FontSize', 12, 'FontWeight', 'bold');
 legend('Location', 'best', 'FontSize', 9);
 grid on; box on;
 xlim([0 20]);
+ylim([-6e-3,6e-3])
 
 saveas(fig1, fullfile(output_dir, 'Figure1_Pearson_Correlation_Spectrum.png'));
 fprintf('  ✓ Saved\n');
@@ -133,10 +136,10 @@ fprintf('Creating Figure 2: Mutual Information Spectrum...\n');
 
 fig2 = figure('Position', [100, 100, 1600, 900]);
 sgtitle('Spike Rate vs LFP Amplitude: Mutual Information (Nonlinear/Context-dependent)', 'FontSize', 16, 'FontWeight', 'bold');
-
+ax = [];
 % Aversive (7 periods)
 for p = 1:7
-    subplot(2, 4, p);
+    ax(end+1) = subplot(2, 4, p);
     aversive_data = tbl(tbl.SessionType == 'Aversive' & tbl.Period == p, :);
 
     if ~isempty(aversive_data)
@@ -146,6 +149,8 @@ for p = 1:7
         if p >= 5, xlabel('Frequency (Hz)', 'FontSize', 11); end
     end
 end
+linkaxes(ax,'xy')
+ylim([0.005,0.015])
 
 % Reward (4 periods)
 subplot(2, 4, 8);
@@ -169,6 +174,7 @@ title('Reward (All Periods)', 'FontSize', 12, 'FontWeight', 'bold');
 legend('Location', 'best', 'FontSize', 9);
 grid on; box on;
 xlim([0 20]);
+ylim([0.005,0.015])
 
 saveas(fig2, fullfile(output_dir, 'Figure2_Mutual_Information_Spectrum.png'));
 fprintf('  ✓ Saved\n');
