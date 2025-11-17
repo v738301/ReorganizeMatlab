@@ -501,14 +501,13 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
     if low_freq < 1
         % Remove DC offset and slow drift
         LFP_detrend = detrend(LFP);           % Remove linear trend
-        LFP_demean = LFP_detrend - mean(LFP_detrend);  % Remove mean
 
         % Apply lowpass filter (much faster than bandpass with low cutoff)
         if high_freq < Fs/2
-            LFP_filtered = lowpass(LFP_demean, high_freq, Fs, ...
+            LFP_filtered = lowpass(LFP_detrend, high_freq, Fs, ...
                 'ImpulseResponse', 'fir', 'Steepness', 0.85);
         else
-            LFP_filtered = LFP_demean;  % Already detrended/demeaned
+            LFP_filtered = LFP_detrend;  % Already detrended/demeaned
         end
     else
         % For higher frequencies: standard bandpass filtering
