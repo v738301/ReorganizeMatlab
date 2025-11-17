@@ -133,7 +133,8 @@ for sess_idx = 1:num_aversive_sessions
     % Preprocess LFP
     [filtered_data] = preprocessSignals(Signal, Fs, config.bp_range);
     bestChannel = findBestLFPChannel(filtered_data, Fs);
-    LFP = filtered_data(:, bestChannel);
+    LFP = Signal(:, bestChannel);
+    clear filtered_data Signal
 
     n_valid_aversive = n_valid_aversive + 1;
     spike_filename = allfiles_aversive(sess_idx).name;
@@ -305,7 +306,8 @@ for sess_idx = 1:num_reward_sessions
     % Preprocess LFP
     [filtered_data] = preprocessSignals(Signal, Fs, config.bp_range);
     bestChannel = findBestLFPChannel(filtered_data, Fs);
-    LFP = filtered_data(:, bestChannel);
+    LFP = Signal(:, bestChannel);
+    clear filtered_data Signal
 
     n_valid_reward = n_valid_reward + 1;
     spike_filename = allfiles_reward(sess_idx).name;
