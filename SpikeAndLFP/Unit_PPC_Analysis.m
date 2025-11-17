@@ -178,6 +178,7 @@ for sess_idx = 1:num_aversive_sessions
     fprintf(['  Processing %d frequency bands (0.1-20 Hz) \n'], n_bands);
 
     for band_idx = 1:n_bands
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
         band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
@@ -191,6 +192,7 @@ for sess_idx = 1:num_aversive_sessions
 
         % Process each unit for this band
         for unit_idx = 1:n_units
+            fprintf('    Processed %d/%d Unit...\n', unit_idx, n_units);
             spike_times = valid_spikes{unit_idx};
 
             if isempty(spike_times)
@@ -246,9 +248,6 @@ for sess_idx = 1:num_aversive_sessions
         % Clear phase signal before next band (free memory)
         clear phase_signal;
 
-        if mod(band_idx, 5) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
     end
     fprintf('  ✓ All bands processed\n');
 
@@ -342,6 +341,7 @@ for sess_idx = 1:num_reward_sessions
     fprintf('  Processing %d frequency bands (0.1-20 Hz) \n', n_bands);
 
     for band_idx = 1:n_bands
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
         band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
@@ -355,6 +355,7 @@ for sess_idx = 1:num_reward_sessions
 
         % Process each unit for this band
         for unit_idx = 1:n_units
+            fprintf('    Processed %d/%d Unit...\n', unit_idx, n_units);
             spike_times = valid_spikes{unit_idx};
 
             if isempty(spike_times)
@@ -409,10 +410,7 @@ for sess_idx = 1:num_reward_sessions
 
         % Clear phase signal before next band (free memory)
         clear phase_signal;
-
-        if mod(band_idx, 5) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
+        
     end
     fprintf('  ✓ All bands processed\n');
 
