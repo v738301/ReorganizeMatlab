@@ -353,7 +353,7 @@ function MI = compute_mutual_information(X, Y, n_bins)
     Y_discrete = discretize(Y, Y_edges);
 
     % Remove NaN values
-    valid = ~isnan(X_discrete) & ~isnan(Y_discrete);
+    valid = ~isnan(X_discrete(:)) & ~isnan(Y_discrete(:));
     X_discrete = X_discrete(valid);
     Y_discrete = Y_discrete(valid);
 
