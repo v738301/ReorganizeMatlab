@@ -286,7 +286,6 @@ function session_results = compute_amplitude_correlation(NeuralTime, LFP, valid_
                 end
 
                 amp_values = amplitude_envelope(amp_indices);
-                spike_rate = spike_rate(1:length(amp_values));  % Match lengths
 
                 % Compute Pearson correlation (linear)
                 [r, p] = corr(amp_values(:), spike_rate(:));
