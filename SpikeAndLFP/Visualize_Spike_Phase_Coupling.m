@@ -73,6 +73,9 @@ create_example_units_plot(reward_seeking_results, reward_aversive_results, band_
 %% Figure 6: Simple Units × Bands Heatmap Overview
 fprintf('Creating Figure 6: Simple Units × Bands Heatmap...\n');
 
+% NOTE: This heatmap shows data aggregated across ALL sessions and periods
+% (no period filtering available as data is pre-aggregated)
+
 fig = figure('Position', [300, 300, 1600, 900]);
 set(fig, 'Color', 'white');
 
