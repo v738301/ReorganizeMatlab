@@ -570,8 +570,8 @@ function PPC = calculate_PPC(phases)
 %
 % Formula: PPC = (2 / (N * (N-1))) * Σ_i Σ_{j>i} cos(φ_i - φ_j)
 %
-% Memory-efficient implementation using trigonometric identity:
-% Σ_i Σ_{j>i} cos(φ_i - φ_j) = 0.5 * [(Σcos(φ))² + (Σsin(φ))² - N]
+% Memory-efficient implementation using complex exponentials:
+% PPC = (|Σ exp(1j*φ)|² - N) / (N*(N-1))
 %
 % This avoids creating N×N matrices which cause crashes for units with
 % many spikes (e.g., 10,000 spikes → 800 MB for one matrix!)
@@ -580,9 +580,12 @@ function PPC = calculate_PPC(phases)
 %   phases - Nx1 vector of phase angles in radians
 %
 % OUTPUTS:
-%   PPC - Pairwise Phase Consistency [0, 1]
-%         0 = no phase consistency (uniform)
-%         1 = perfect phase consistency (all spikes at same phase)
+%   PPC - Pairwise Phase Consistency
+%         Range: [-1/(N-1), 1]
+%         - Values near 0: no phase consistency (uniform distribution)
+%         - Values near 1: strong phase consistency
+%         - Negative values (near 0): possible for small N, indicate no locking
+%         - For large N, range approaches [0, 1]
 
     N = length(phases);
 
@@ -591,17 +594,9 @@ function PPC = calculate_PPC(phases)
         return;
     end
 
-    % Memory-efficient calculation (no N×N matrices!)
-    % Compute sums of cos and sin
-    sum_cos = sum(cos(phases));
-    sum_sin = sum(sin(phases));
-
-    % Apply mathematical identity to avoid pairwise matrix
-    % Σ_i Σ_{j>i} cos(φ_i - φ_j) = 0.5 * [(Σcos)² + (Σsin)² - N]
-    pairwise_sum = 0.5 * (sum_cos^2 + sum_sin^2 - N);
-
-    % PPC formula
-    PPC = (2 / (N * (N - 1))) * pairwise_sum;
+    % Memory-efficient calculation using complex exponentials
+    z = exp(1j * phases);
+    PPC = (abs(sum(z))^2 - N) / (N * (N - 1));
 end
 
 function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with_CI(phases, n_bootstrap, ci_level)
