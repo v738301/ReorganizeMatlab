@@ -2,7 +2,7 @@
 UNIT PPC ANALYSIS - SUMMARY STATISTICS
 ========================================
 
-Generated: 17-Nov-2025 18:32:09
+Generated: 17-Nov-2025 21:46:00
 
 Dataset Overview:
   Total data points: 107236
