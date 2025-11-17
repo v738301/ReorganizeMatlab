@@ -47,6 +47,8 @@ for i = 1:n_aversive
     load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({aversive_files(i).name}, height(session_results.data), 1);
         all_data_aversive = [all_data_aversive; session_results.data];
     end
 end
@@ -55,6 +57,8 @@ for i = 1:n_reward
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({reward_files(i).name}, height(session_results.data), 1);
         all_data_reward = [all_data_reward; session_results.data];
     end
 end
@@ -261,6 +265,152 @@ saveas(fig3, fullfile(output_dir, 'Figure3_Preferred_Phase_Analysis.png'));
 fprintf('  ✓ Saved: Figure3_Preferred_Phase_Analysis.png\n');
 
 %% ========================================================================
+%  FIGURE 4: SESSION-LEVEL PPC SPECTRA (8 Hz FOCUS)
+%  ========================================================================
+
+fprintf('Creating Figure 4: Session-Level PPC Spectra...\n');
+
+fig4 = figure('Position', [200, 200, 1800, 900]);
+sgtitle('Session-Level PPC Spectra at 8 Hz', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Focus on 8 Hz band (7-9 Hz)
+data_8hz = tbl(tbl.Freq_Low_Hz >= 7 & tbl.Freq_High_Hz <= 9, :);
+
+% Aversive sessions - show each session as a line
+subplot(2, 2, 1);
+plotSessionLevelPPC(data_8hz(data_8hz.SessionType == 'Aversive', :), 7, color_aversive, 'Aversive');
+title('Aversive: Individual Sessions (8 Hz)', 'FontSize', 13, 'FontWeight', 'bold');
+
+% Reward sessions - show each session as a line
+subplot(2, 2, 2);
+plotSessionLevelPPC(data_8hz(data_8hz.SessionType == 'Reward', :), 4, color_reward, 'Reward');
+title('Reward: Individual Sessions (8 Hz)', 'FontSize', 13, 'FontWeight', 'bold');
+
+% Aversive - all frequencies, period 1
+subplot(2, 2, 3);
+plotSessionLevelPPCSpectrum(tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :), unique_freqs, color_aversive);
+title('Aversive: Session-Level PPC Spectra (Period 1)', 'FontSize', 13, 'FontWeight', 'bold');
+
+% Reward - all frequencies, period 1
+subplot(2, 2, 4);
+plotSessionLevelPPCSpectrum(tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :), unique_freqs, color_reward);
+title('Reward: Session-Level PPC Spectra (Period 1)', 'FontSize', 13, 'FontWeight', 'bold');
+
+saveas(fig4, fullfile(output_dir, 'Figure4_Session_Level_PPC.png'));
+fprintf('  ✓ Saved: Figure4_Session_Level_PPC.png\n');
+
+%% ========================================================================
+%  FIGURE 5: UNIT-LEVEL PPC DISTRIBUTIONS
+%  ========================================================================
+
+fprintf('Creating Figure 5: Unit-Level PPC Distributions...\n');
+
+fig5 = figure('Position', [250, 250, 1800, 1000]);
+sgtitle('Unit-Level PPC Analysis (8 Hz Band)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Aversive - unit-level distributions across periods
+for p = 1:4
+    subplot(2, 4, p);
+    period_data = data_8hz(data_8hz.SessionType == 'Aversive' & data_8hz.Period == p, :);
+    if ~isempty(period_data)
+        plotUnitLevelDistribution(period_data, color_aversive);
+        title(sprintf('Aversive P%d (n=%d units)', p, height(period_data)), 'FontSize', 11, 'FontWeight', 'bold');
+        if p == 1, ylabel('Count', 'FontSize', 11); end
+        xlabel('PPC', 'FontSize', 11);
+    end
+end
+
+% Reward - unit-level distributions across periods
+for p = 1:4
+    subplot(2, 4, 4 + p);
+    period_data = data_8hz(data_8hz.SessionType == 'Reward' & data_8hz.Period == p, :);
+    if ~isempty(period_data)
+        plotUnitLevelDistribution(period_data, color_reward);
+        title(sprintf('Reward P%d (n=%d units)', p, height(period_data)), 'FontSize', 11, 'FontWeight', 'bold');
+        if p == 1, ylabel('Count', 'FontSize', 11); end
+        xlabel('PPC', 'FontSize', 11);
+    end
+end
+
+saveas(fig5, fullfile(output_dir, 'Figure5_Unit_Level_Distributions.png'));
+fprintf('  ✓ Saved: Figure5_Unit_Level_Distributions.png\n');
+
+%% ========================================================================
+%  FIGURE 6: INDIVIDUAL UNIT PPC SPECTRA (SELECTED UNITS)
+%  ========================================================================
+
+fprintf('Creating Figure 6: Individual Unit PPC Spectra...\n');
+
+fig6 = figure('Position', [300, 300, 1800, 1000]);
+sgtitle('Individual Unit PPC Spectra (Aversive Period 1, Top 12 Units by Mean PPC)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Select top units from Aversive Period 1 based on mean PPC
+aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
+
+% Calculate mean PPC per unit
+unique_units = unique(aversive_p1.Unit);
+unit_mean_ppc = zeros(length(unique_units), 1);
+for u = 1:length(unique_units)
+    unit_data = aversive_p1(aversive_p1.Unit == unique_units(u), :);
+    unit_mean_ppc(u) = mean(unit_data.PPC, 'omitnan');
+end
+
+% Sort and select top 12 units
+[~, sort_idx] = sort(unit_mean_ppc, 'descend');
+top_units = unique_units(sort_idx(1:min(12, length(unique_units))));
+
+% Plot each unit's PPC spectrum
+for u = 1:min(12, length(top_units))
+    subplot(3, 4, u);
+    unit_data = aversive_p1(aversive_p1.Unit == top_units(u), :);
+
+    if ~isempty(unit_data)
+        % Create PPC spectrum for this unit
+        ppc_spectrum = nan(1, length(unique_freqs));
+        for f = 1:length(unique_freqs)
+            freq_data = unit_data(unit_data.Freq_Low_Hz == unique_freqs(f), :);
+            if ~isempty(freq_data)
+                ppc_spectrum(f) = mean(freq_data.PPC, 'omitnan');
+            end
+        end
+
+        hold on;
+        plot(unique_freqs, ppc_spectrum, '-o', 'Color', color_aversive, 'LineWidth', 1.5, 'MarkerSize', 4);
+        plot([8 8], ylim, 'r--', 'LineWidth', 1);
+
+        xlabel('Frequency (Hz)', 'FontSize', 9);
+        ylabel('PPC', 'FontSize', 9);
+        title(sprintf('Unit %d (mean=%.3f)', top_units(u), unit_mean_ppc(sort_idx(u))), 'FontSize', 10);
+        grid on; box on;
+        xlim([0 20]);
+        ylim([0 max(ppc_spectrum)*1.2]);
+    end
+end
+
+saveas(fig6, fullfile(output_dir, 'Figure6_Individual_Unit_Spectra.png'));
+fprintf('  ✓ Saved: Figure6_Individual_Unit_Spectra.png\n');
+
+%% ========================================================================
+%  FIGURE 7: SESSION-BY-SESSION HEATMAP (8 Hz)
+%  ========================================================================
+
+fprintf('Creating Figure 7: Session-by-Session Heatmap...\n');
+
+fig7 = figure('Position', [350, 350, 1800, 800]);
+sgtitle('Session-by-Session PPC Heatmap at 8 Hz', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Aversive heatmap
+subplot(1, 2, 1);
+plotSessionHeatmap(data_8hz(data_8hz.SessionType == 'Aversive', :), 7, 'Aversive');
+
+% Reward heatmap
+subplot(1, 2, 2);
+plotSessionHeatmap(data_8hz(data_8hz.SessionType == 'Reward', :), 4, 'Reward');
+
+saveas(fig7, fullfile(output_dir, 'Figure7_Session_Heatmap.png'));
+fprintf('  ✓ Saved: Figure7_Session_Heatmap.png\n');
+
+%% ========================================================================
 %  SECTION 3: SUMMARY STATISTICS
 %  ========================================================================
 
@@ -320,10 +470,14 @@ fprintf('\n========================================\n');
 fprintf('VISUALIZATION COMPLETE!\n');
 fprintf('========================================\n');
 fprintf('All figures saved to: %s/\n', output_dir);
-fprintf('Total figures generated: 3\n');
+fprintf('Total figures generated: 7\n');
 fprintf('  - Figure 1: PPC Spectrograms\n');
 fprintf('  - Figure 2: Frequency Band Summaries\n');
 fprintf('  - Figure 3: Preferred Phase Analysis\n');
+fprintf('  - Figure 4: Session-Level PPC Spectra\n');
+fprintf('  - Figure 5: Unit-Level PPC Distributions\n');
+fprintf('  - Figure 6: Individual Unit PPC Spectra\n');
+fprintf('  - Figure 7: Session-by-Session Heatmap\n');
 fprintf('Summary statistics: %s\n', summary_file);
 fprintf('========================================\n');
 
@@ -415,4 +569,187 @@ function plotOverallPPCSummary(tbl, color_aversive, color_reward)
     xlim([0.5, 7.5]);
     set(gca, 'XTick', 1:7);
     hold off;
+end
+
+function plotSessionLevelPPC(data, n_periods, color, label)
+% Plot PPC across periods for individual sessions
+%
+% INPUTS:
+%   data       - Data for specific session type and frequency
+%   n_periods  - Number of periods
+%   color      - Base color
+%   label      - Session type label
+
+    unique_sessions = unique(data.SessionID);
+    n_sessions = length(unique_sessions);
+
+    % Generate colors (lighter versions of base color)
+    colors = repmat(color, n_sessions, 1);
+    colors = colors .* repmat(linspace(0.4, 1, n_sessions)', 1, 3);
+
+    hold on;
+
+    % Plot each session
+    for s = 1:n_sessions
+        session_data = data(data.SessionID == unique_sessions(s), :);
+
+        % Compute mean PPC per period for this session
+        period_ppc = zeros(1, n_periods);
+        for p = 1:n_periods
+            period_data = session_data(session_data.Period == p, :);
+            if ~isempty(period_data)
+                period_ppc(p) = mean(period_data.PPC, 'omitnan');
+            else
+                period_ppc(p) = NaN;
+            end
+        end
+
+        plot(1:n_periods, period_ppc, '-o', 'Color', colors(s, :), ...
+             'LineWidth', 1.5, 'MarkerSize', 5, 'MarkerFaceColor', colors(s, :));
+    end
+
+    % Plot overall mean
+    overall_mean = zeros(1, n_periods);
+    for p = 1:n_periods
+        period_data = data(data.Period == p, :);
+        if ~isempty(period_data)
+            overall_mean(p) = mean(period_data.PPC, 'omitnan');
+        end
+    end
+    plot(1:n_periods, overall_mean, '-', 'Color', color, 'LineWidth', 3, 'DisplayName', 'Mean');
+
+    xlabel('Period', 'FontSize', 12);
+    ylabel('PPC (8 Hz)', 'FontSize', 12);
+    grid on; box on;
+    xlim([0.5, n_periods + 0.5]);
+    set(gca, 'XTick', 1:n_periods);
+    legend('Location', 'best');
+    hold off;
+end
+
+function plotSessionLevelPPCSpectrum(data, unique_freqs, color)
+% Plot PPC spectra for individual sessions
+%
+% INPUTS:
+%   data         - Data for specific session type and period
+%   unique_freqs - Vector of unique frequencies
+%   color        - Base color
+
+    unique_sessions = unique(data.SessionID);
+    n_sessions = length(unique_sessions);
+
+    % Generate colors
+    colors = repmat(color, n_sessions, 1);
+    colors = colors .* repmat(linspace(0.4, 1, n_sessions)', 1, 3);
+
+    hold on;
+
+    % Plot each session
+    for s = 1:n_sessions
+        session_data = data(data.SessionID == unique_sessions(s), :);
+
+        % Compute PPC spectrum for this session
+        ppc_spectrum = zeros(1, length(unique_freqs));
+        for f = 1:length(unique_freqs)
+            freq_data = session_data(session_data.Freq_Low_Hz == unique_freqs(f), :);
+            if ~isempty(freq_data)
+                ppc_spectrum(f) = mean(freq_data.PPC, 'omitnan');
+            else
+                ppc_spectrum(f) = NaN;
+            end
+        end
+
+        plot(unique_freqs, ppc_spectrum, '-', 'Color', colors(s, :), 'LineWidth', 1);
+    end
+
+    % Plot overall mean
+    overall_mean = zeros(1, length(unique_freqs));
+    for f = 1:length(unique_freqs)
+        freq_data = data(data.Freq_Low_Hz == unique_freqs(f), :);
+        if ~isempty(freq_data)
+            overall_mean(f) = mean(freq_data.PPC, 'omitnan');
+        end
+    end
+    plot(unique_freqs, overall_mean, '-', 'Color', color, 'LineWidth', 3, 'DisplayName', 'Mean');
+
+    % Highlight 8 Hz
+    plot([8 8], ylim, 'r--', 'LineWidth', 1.5);
+    text(8, max(ylim)*0.9, ' 8 Hz', 'FontSize', 10, 'Color', 'r', 'FontWeight', 'bold');
+
+    xlabel('Frequency (Hz)', 'FontSize', 12);
+    ylabel('PPC', 'FontSize', 12);
+    grid on; box on;
+    xlim([0 20]);
+    legend('Location', 'best');
+    hold off;
+end
+
+function plotUnitLevelDistribution(data, color)
+% Plot histogram of PPC values across units
+%
+% INPUTS:
+%   data  - Data containing PPC values for multiple units
+%   color - Histogram color
+
+    ppc_values = data.PPC(~isnan(data.PPC));
+
+    if isempty(ppc_values)
+        return;
+    end
+
+    % Histogram
+    histogram(ppc_values, 20, 'FaceColor', color, 'EdgeColor', 'k', 'FaceAlpha', 0.7);
+
+    % Add mean line
+    mean_ppc = mean(ppc_values);
+    hold on;
+    yl = ylim;
+    plot([mean_ppc mean_ppc], yl, 'k--', 'LineWidth', 2);
+    text(mean_ppc, yl(2)*0.9, sprintf(' μ=%.3f', mean_ppc), ...
+         'FontSize', 9, 'FontWeight', 'bold');
+
+    xlabel('PPC', 'FontSize', 11);
+    ylabel('Count', 'FontSize', 11);
+    grid on; box on;
+    xlim([0 max(ppc_values)*1.2]);
+    hold off;
+end
+
+function plotSessionHeatmap(data, n_periods, label)
+% Plot heatmap of PPC values: sessions × periods
+%
+% INPUTS:
+%   data      - Data for specific session type
+%   n_periods - Number of periods
+%   label     - Session type label
+
+    unique_sessions = unique(data.SessionID);
+    n_sessions = length(unique_sessions);
+
+    % Create heatmap matrix: sessions × periods
+    heatmap_matrix = nan(n_sessions, n_periods);
+
+    for s = 1:n_sessions
+        session_data = data(data.SessionID == unique_sessions(s), :);
+
+        for p = 1:n_periods
+            period_data = session_data(session_data.Period == p, :);
+            if ~isempty(period_data)
+                heatmap_matrix(s, p) = mean(period_data.PPC, 'omitnan');
+            end
+        end
+    end
+
+    % Plot heatmap
+    imagesc(1:n_periods, 1:n_sessions, heatmap_matrix);
+    colormap(jet);
+    colorbar;
+
+    xlabel('Period', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Session ID', 'FontSize', 12, 'FontWeight', 'bold');
+    title(sprintf('%s Sessions (8 Hz)', label), 'FontSize', 13, 'FontWeight', 'bold');
+
+    set(gca, 'XTick', 1:n_periods);
+    set(gca, 'YTick', 1:n_sessions);
+    set(gca, 'YDir', 'normal');
 end
