@@ -174,61 +174,53 @@ for sess_idx = 1:num_aversive_sessions
     session_data.n_spikes = [];
     session_data.reliability = {};
 
-    % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands (0.1-20 Hz)...\n', n_bands);
-    phase_signals = cell(n_bands, 1);
+    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
+    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
+    % on-demand and clear it before the next band (only ~150 MB at a time)
+    fprintf('  Processing %d frequency bands (0.1-20 Hz) - memory efficient mode...\n', n_bands);
 
     for band_idx = 1:n_bands
+        band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
-        % Apply unified FIR bandpass filtering
+        % Compute phase signal for THIS band only
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
-
-        % Hilbert transform to get instantaneous phase
         analytic_signal = hilbert(LFP_filtered);
-        phase_signals{band_idx} = angle(analytic_signal);  % Phase in radians [-π, π]
+        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
 
-        if mod(band_idx, 30) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
-    end
-    fprintf('  ✓ All phase signals computed\n');
+        % Free up memory
+        clear LFP_filtered analytic_signal;
 
-    % Process each unit
-    for unit_idx = 1:n_units
-        spike_times = valid_spikes{unit_idx};
+        % Process each unit for this band
+        for unit_idx = 1:n_units
+            spike_times = valid_spikes{unit_idx};
 
-        if isempty(spike_times)
-            continue;
-        end
-
-        % Process each period
-        for period_idx = 1:n_periods
-            period_start = period_boundaries(period_idx);
-            period_end = period_boundaries(period_idx + 1);
-            period_duration = period_end - period_start;
-
-            % Extract spikes in this period
-            spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
-            n_spikes = length(spikes_in_period);
-
-            % Skip if too few spikes
-            if n_spikes < config.min_spikes
+            if isempty(spike_times)
                 continue;
             end
 
-            % Convert spike times to indices in NeuralTime
-            spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
-            spike_indices = round(spike_indices);
-            spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
+            % Process each period for this unit
+            for period_idx = 1:n_periods
+                period_start = period_boundaries(period_idx);
+                period_end = period_boundaries(period_idx + 1);
+                period_duration = period_end - period_start;
 
-            % Process each frequency band
-            for band_idx = 1:n_bands
-                band_name = config.frequency_bands{band_idx, 1};
-                band_range = config.frequency_bands{band_idx, 2};
+                % Extract spikes in this period
+                spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
+                n_spikes = length(spikes_in_period);
+
+                % Skip if too few spikes
+                if n_spikes < config.min_spikes
+                    continue;
+                end
+
+                % Convert spike times to indices in NeuralTime
+                spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
+                spike_indices = round(spike_indices);
+                spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
 
                 % Extract spike phases for this band
-                spike_phases = phase_signals{band_idx}(spike_indices);
+                spike_phases = phase_signal(spike_indices);
 
                 % Calculate PPC and statistics
                 [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = ...
@@ -252,7 +244,15 @@ for sess_idx = 1:num_aversive_sessions
                 session_data.reliability{end+1} = reliability;
             end
         end
+
+        % Clear phase signal before next band (free memory)
+        clear phase_signal;
+
+        if mod(band_idx, 5) == 0
+            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        end
     end
+    fprintf('  ✓ All bands processed\n');
 
     % Convert session data to table and save
     session_results.data = struct2table(session_data);
@@ -367,61 +367,53 @@ for sess_idx = 1:num_reward_sessions
     session_data.n_spikes = [];
     session_data.reliability = {};
 
-    % Pre-compute phase signals for all frequency bands
-    fprintf('  Computing phase signals for %d frequency bands (0.1-20 Hz)...\n', n_bands);
-    phase_signals = cell(n_bands, 1);
+    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
+    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
+    % on-demand and clear it before the next band (only ~150 MB at a time)
+    fprintf('  Processing %d frequency bands (0.1-20 Hz) - memory efficient mode...\n', n_bands);
 
     for band_idx = 1:n_bands
+        band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
-        % Apply unified FIR bandpass filtering
+        % Compute phase signal for THIS band only
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
-
-        % Hilbert transform
         analytic_signal = hilbert(LFP_filtered);
-        phase_signals{band_idx} = angle(analytic_signal);
+        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
 
-        if mod(band_idx, 30) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
-    end
-    fprintf('  ✓ All phase signals computed\n');
+        % Free up memory
+        clear LFP_filtered analytic_signal;
 
-    % Process each unit
-    for unit_idx = 1:n_units
-        spike_times = valid_spikes{unit_idx};
+        % Process each unit for this band
+        for unit_idx = 1:n_units
+            spike_times = valid_spikes{unit_idx};
 
-        if isempty(spike_times)
-            continue;
-        end
-
-        % Process each period
-        for period_idx = 1:n_periods
-            period_start = period_boundaries(period_idx);
-            period_end = period_boundaries(period_idx + 1);
-            period_duration = period_end - period_start;
-
-            % Extract spikes in this period
-            spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
-            n_spikes = length(spikes_in_period);
-
-            % Skip if too few spikes
-            if n_spikes < config.min_spikes
+            if isempty(spike_times)
                 continue;
             end
 
-            % Convert spike times to indices in NeuralTime
-            spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
-            spike_indices = round(spike_indices);
-            spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
+            % Process each period for this unit
+            for period_idx = 1:n_periods
+                period_start = period_boundaries(period_idx);
+                period_end = period_boundaries(period_idx + 1);
+                period_duration = period_end - period_start;
 
-            % Process each frequency band
-            for band_idx = 1:n_bands
-                band_name = config.frequency_bands{band_idx, 1};
-                band_range = config.frequency_bands{band_idx, 2};
+                % Extract spikes in this period
+                spikes_in_period = spike_times(spike_times >= period_start & spike_times < period_end);
+                n_spikes = length(spikes_in_period);
+
+                % Skip if too few spikes
+                if n_spikes < config.min_spikes
+                    continue;
+                end
+
+                % Convert spike times to indices in NeuralTime
+                spike_indices = interp1(NeuralTime, 1:length(NeuralTime), spikes_in_period, 'nearest', 'extrap');
+                spike_indices = round(spike_indices);
+                spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(NeuralTime));
 
                 % Extract spike phases for this band
-                spike_phases = phase_signals{band_idx}(spike_indices);
+                spike_phases = phase_signal(spike_indices);
 
                 % Calculate PPC and statistics
                 [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = ...
@@ -445,7 +437,15 @@ for sess_idx = 1:num_reward_sessions
                 session_data.reliability{end+1} = reliability;
             end
         end
+
+        % Clear phase signal before next band (free memory)
+        clear phase_signal;
+
+        if mod(band_idx, 5) == 0
+            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        end
     end
+    fprintf('  ✓ All bands processed\n');
 
     % Convert session data to table and save
     session_results.data = struct2table(session_data);
