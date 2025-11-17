@@ -140,8 +140,8 @@ for sess_idx = 1:num_aversive_sessions
 
     % Define 7 period boundaries using 6 noises
     period_boundaries = [TriggerMid(1), ...
-                         all_aversive_time(1:6)' + TriggerMid(1), ...
-                         TriggerMid(end)];
+        all_aversive_time(1:6)' + TriggerMid(1), ...
+        TriggerMid(end)];
 
     n_periods = 7;
     n_units = length(valid_spikes);
@@ -174,31 +174,17 @@ for sess_idx = 1:num_aversive_sessions
     session_data.n_spikes = [];
     session_data.reliability = {};
 
-    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
-    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
-    % on-demand and clear it before the next band (only ~150 MB at a time)
-    fprintf('  Processing %d frequency bands (0.1-20 Hz) - memory efficient mode...\n', n_bands);
+
+    fprintf(['  Processing %d frequency bands (0.1-20 Hz) \n'], n_bands);
 
     for band_idx = 1:n_bands
-        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
+        band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
 
         % Compute phase signal for THIS band only
         LFP_filtered = filter_LFP_robust(LFP, band_range, Fs);
         analytic_signal = hilbert(LFP_filtered);
-        phase_signals{band_idx} = angle(analytic_signal);  % Phase in radians [-π, π]
-
-    end
-    fprintf('  ✓ All phase signals computed\n');
-
-    % Process each unit
-    for unit_idx = 1:n_units
-        fprintf('    Processed %d/%d Units...\n', unit_idx, n_units);
-        spike_times = valid_spikes{unit_idx};
-
-        if isempty(spike_times)
-            continue;
-        end
+        phase_signal = angle(analytic_signal);  % Phase in radians [-π, π]
 
         % Free up memory
         clear LFP_filtered analytic_signal;
@@ -238,7 +224,7 @@ for sess_idx = 1:num_aversive_sessions
                 [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = ...
                     calculate_PPC_with_CI(spike_phases, config.bootstrap_samples, config.ci_level);
 
-                % Determine reliability based on spike count
+                % Determine reliability
                 reliability = determine_reliability(n_spikes);
 
                 % Store data in session_data
@@ -353,10 +339,7 @@ for sess_idx = 1:num_reward_sessions
     session_data.n_spikes = [];
     session_data.reliability = {};
 
-    % MEMORY-EFFICIENT APPROACH: Process one frequency band at a time
-    % Instead of pre-computing all 20 phase signals (2-3 GB), we compute each band
-    % on-demand and clear it before the next band (only ~150 MB at a time)
-    fprintf('  Processing %d frequency bands (0.1-20 Hz) - memory efficient mode...\n', n_bands);
+    fprintf('  Processing %d frequency bands (0.1-20 Hz) \n', n_bands);
 
     for band_idx = 1:n_bands
         band_name = config.frequency_bands{band_idx, 1};
@@ -507,32 +490,32 @@ function LFP_filtered = filter_LFP_robust(LFP, band_range, Fs)
 % OUTPUTS:
 %   LFP_filtered - Filtered LFP signal
 
-    low_freq = band_range(1);
-    high_freq = band_range(2);
+low_freq = band_range(1);
+high_freq = band_range(2);
 
-    % For very low frequency bands (<1 Hz): optimize by detrending + lowpass
-    if low_freq < 1
-        % Remove DC offset and slow drift
-        LFP_detrend = detrend(LFP);           % Remove linear trend
+% For very low frequency bands (<1 Hz): optimize by detrending + lowpass
+if low_freq < 1
+    % Remove DC offset and slow drift
+    LFP_detrend = detrend(LFP);           % Remove linear trend
 
-        % Apply lowpass filter (much faster than bandpass with low cutoff)
-        if high_freq < Fs/2
-            LFP_filtered = lowpass(LFP_detrend, high_freq, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        else
-            LFP_filtered = LFP_detrend;  % Already detrended/demeaned
-        end
+    % Apply lowpass filter (much faster than bandpass with low cutoff)
+    if high_freq < Fs/2
+        LFP_filtered = lowpass(LFP_detrend, high_freq, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
     else
-        % For higher frequencies: standard bandpass filtering
-        if high_freq < Fs/2
-            LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        else
-            % High-pass only if high_freq exceeds Nyquist
-            LFP_filtered = highpass(LFP, low_freq, Fs, ...
-                'ImpulseResponse', 'fir', 'Steepness', 0.85);
-        end
+        LFP_filtered = LFP_detrend;  % Already detrended/demeaned
     end
+else
+    % For higher frequencies: standard bandpass filtering
+    if high_freq < Fs/2
+        LFP_filtered = bandpass(LFP, [low_freq, high_freq], Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+    else
+        % High-pass only if high_freq exceeds Nyquist
+        LFP_filtered = highpass(LFP, low_freq, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+    end
+end
 end
 
 function PPC = calculate_PPC(phases)
@@ -551,22 +534,22 @@ function PPC = calculate_PPC(phases)
 %         0 = no phase consistency (uniform)
 %         1 = perfect phase consistency (all spikes at same phase)
 
-    N = length(phases);
+N = length(phases);
 
-    if N < 2
-        PPC = NaN;
-        return;
-    end
+if N < 2
+    PPC = NaN;
+    return;
+end
 
-    % Vectorized calculation of all pairwise phase differences
-    phase_diffs = bsxfun(@minus, phases, phases');
+% Vectorized calculation of all pairwise phase differences
+phase_diffs = bsxfun(@minus, phases, phases');
 
-    % Sum of cosines over upper triangle (unique pairs)
-    cos_diffs = cos(phase_diffs);
-    sum_cos = sum(triu(cos_diffs, 1), 'all');
+% Sum of cosines over upper triangle (unique pairs)
+cos_diffs = cos(phase_diffs);
+sum_cos = sum(triu(cos_diffs, 1), 'all');
 
-    % PPC formula
-    PPC = (2 / (N * (N - 1))) * sum_cos;
+% PPC formula
+PPC = (2 / (N * (N - 1))) * sum_cos;
 end
 
 function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with_CI(phases, n_bootstrap, ci_level)
@@ -583,44 +566,44 @@ function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with
 %   PPC_CI_lower  - Lower bound of CI (NaN if bootstrap disabled)
 %   PPC_CI_upper  - Upper bound of CI (NaN if bootstrap disabled)
 
-    N = length(phases);
+N = length(phases);
 
-    if N < 2
-        PPC = NaN;
-        preferred_phase = NaN;
-        PPC_CI_lower = NaN;
-        PPC_CI_upper = NaN;
-        return;
+if N < 2
+    PPC = NaN;
+    preferred_phase = NaN;
+    PPC_CI_lower = NaN;
+    PPC_CI_upper = NaN;
+    return;
+end
+
+% Calculate PPC
+PPC = calculate_PPC(phases);
+
+% Calculate preferred phase (circular mean)
+mean_x = mean(cos(phases));
+mean_y = mean(sin(phases));
+preferred_phase = atan2(mean_y, mean_x);
+
+% Bootstrap confidence intervals for PPC (if enabled)
+if n_bootstrap > 0 && N >= 10
+    bootstrap_PPC = zeros(n_bootstrap, 1);
+
+    for b = 1:n_bootstrap
+        % Resample with replacement
+        boot_indices = randi(N, N, 1);
+        boot_phases = phases(boot_indices);
+        bootstrap_PPC(b) = calculate_PPC(boot_phases);
     end
 
-    % Calculate PPC
-    PPC = calculate_PPC(phases);
-
-    % Calculate preferred phase (circular mean)
-    mean_x = mean(cos(phases));
-    mean_y = mean(sin(phases));
-    preferred_phase = atan2(mean_y, mean_x);
-
-    % Bootstrap confidence intervals for PPC (if enabled)
-    if n_bootstrap > 0 && N >= 10
-        bootstrap_PPC = zeros(n_bootstrap, 1);
-
-        for b = 1:n_bootstrap
-            % Resample with replacement
-            boot_indices = randi(N, N, 1);
-            boot_phases = phases(boot_indices);
-            bootstrap_PPC(b) = calculate_PPC(boot_phases);
-        end
-
-        % Calculate confidence intervals
-        alpha = 1 - ci_level;
-        PPC_CI_lower = prctile(bootstrap_PPC, 100 * alpha / 2);
-        PPC_CI_upper = prctile(bootstrap_PPC, 100 * (1 - alpha / 2));
-    else
-        % Bootstrap disabled - fill with NaN
-        PPC_CI_lower = NaN;
-        PPC_CI_upper = NaN;
-    end
+    % Calculate confidence intervals
+    alpha = 1 - ci_level;
+    PPC_CI_lower = prctile(bootstrap_PPC, 100 * alpha / 2);
+    PPC_CI_upper = prctile(bootstrap_PPC, 100 * (1 - alpha / 2));
+else
+    % Bootstrap disabled - fill with NaN
+    PPC_CI_lower = NaN;
+    PPC_CI_upper = NaN;
+end
 end
 
 function reliability = determine_reliability(n_spikes)
@@ -632,15 +615,15 @@ function reliability = determine_reliability(n_spikes)
 % OUTPUTS:
 %   reliability - String: 'very_low', 'low', 'moderate', 'good', 'excellent'
 
-    if n_spikes < 10
-        reliability = 'very_low';
-    elseif n_spikes < 50
-        reliability = 'low';
-    elseif n_spikes < 100
-        reliability = 'moderate';
-    elseif n_spikes < 500
-        reliability = 'good';
-    else
-        reliability = 'excellent';
-    end
+if n_spikes < 10
+    reliability = 'very_low';
+elseif n_spikes < 50
+    reliability = 'low';
+elseif n_spikes < 100
+    reliability = 'moderate';
+elseif n_spikes < 500
+    reliability = 'good';
+else
+    reliability = 'excellent';
+end
 end
