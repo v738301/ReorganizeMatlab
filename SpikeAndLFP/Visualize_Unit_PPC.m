@@ -86,6 +86,7 @@ fprintf('Figures will be saved to: %s/\n\n', output_dir);
 
 % Get unique frequency bands
 unique_freqs = unique(tbl.Freq_Low_Hz);
+unique_freqs = unique_freqs(2:end);
 n_freqs = length(unique_freqs);
 
 fprintf('Frequency resolution:\n');
@@ -108,7 +109,7 @@ spectrogram_aversive = createPPCSpectrogram(aversive_data, unique_freqs, 7);
 imagesc(1:7, unique_freqs, spectrogram_aversive);
 set(gca, 'YDir', 'normal');
 colorbar;
-caxis([0, 0.3]);  % PPC typically ranges 0-0.3 for significant coupling
+% caxis([0, 0.3]);  % PPC typically ranges 0-0.3 for significant coupling
 xlabel('Period', 'FontSize', 12, 'FontWeight', 'bold');
 ylabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
 title('Aversive Sessions (7 periods)', 'FontSize', 13, 'FontWeight', 'bold');
@@ -122,7 +123,7 @@ spectrogram_reward = createPPCSpectrogram(reward_data, unique_freqs, 4);
 imagesc(1:4, unique_freqs, spectrogram_reward);
 set(gca, 'YDir', 'normal');
 colorbar;
-caxis([0, 0.3]);
+% caxis([0, 0.3]);
 xlabel('Period', 'FontSize', 12, 'FontWeight', 'bold');
 ylabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
 title('Reward Sessions (4 periods)', 'FontSize', 13, 'FontWeight', 'bold');

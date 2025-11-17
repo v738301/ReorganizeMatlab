@@ -530,46 +530,55 @@ else
 end
 end
 
-function PPC = calculate_PPC(phases)
-% Calculate Pairwise Phase Consistency (PPC) - MEMORY EFFICIENT
+function ppc = calculate_PPC(phases, varargin)
+% CALCULATE_PPC  Three equivalent ways to compute bias-free PPC (Vinck 2010)
 %
-% PPC is an unbiased measure of phase-locking strength that is not
-% inflated by spike count (unlike MRL).
+%   ppc = calculate_PPC(phases)           % default: fastest complex version
+%   ppc = calculate_PPC(phases,'method','cosdiff')   % explicit cos(phi_i-phi_j)
 %
-% Formula: PPC = (2 / (N * (N-1))) * Σ_i Σ_{j>i} cos(φ_i - φ_j)
+%   All three return *exactly* the same number (within floating-point error)
 %
-% Memory-efficient implementation using trigonometric identity:
-% Σ_i Σ_{j>i} cos(φ_i - φ_j) = 0.5 * [(Σcos(φ))² + (Σsin(φ))² - N]
-%
-% This avoids creating N×N matrices which cause crashes for units with
-% many spikes (e.g., 10,000 spikes → 800 MB for one matrix!)
-%
-% INPUTS:
-%   phases - Nx1 vector of phase angles in radians
-%
-% OUTPUTS:
-%   PPC - Pairwise Phase Consistency [0, 1]
-%         0 = no phase consistency (uniform)
-%         1 = perfect phase consistency (all spikes at same phase)
+%   References:
+%     Vinck et al., NeuroImage 51(1):112-122, 2010 → Eq. 14 (cos-diff version)
+%     Same paper → Eq. 13 & population PPC = PLV² → leads to complex version
 
-N = length(phases);
+ip = inputParser;
+ip.addParameter('method','complex',@(x) any(validatestring(x,{'complex','cosdiff','plv'})));
+ip.parse(varargin{:});
+method = ip.Results.method;
 
+phases = phases(:);
+N = numel(phases);
 if N < 2
-    PPC = NaN;
+    ppc = NaN;
     return;
 end
 
-    % Memory-efficient calculation (no N×N matrices!)
-    % Compute sums of cos and sin
-    sum_cos = sum(cos(phases));
-    sum_sin = sum(sin(phases));
+switch lower(method)
+    case 'complex'   % Fastest, cleanest, most common (gold standard 2020–2025)
+        % |sum exp(iφ_k)|² - N  /  [N(N-1)]
+        z = exp(1j * phases);
+        ppc = (abs(sum(z))^2 - N) / (N*(N-1));
 
-    % Apply mathematical identity to avoid pairwise matrix
-    % Σ_i Σ_{j>i} cos(φ_i - φ_j) = 0.5 * [(Σcos)² + (Σsin)² - N]
-    pairwise_sum = 0.5 * (sum_cos^2 + sum_sin^2 - N);
+    case 'cosdiff'   % Explicit cos(phi_i - phi_j) version — Eq. 14 in Vinck 2010
+        % Σ_{i<j} cos(phi_i - phi_j)  →  then multiply by 2/[N(N-1)]
+        % This is the version printed in the paper (page 114, Eq. 14)
+        total = 0;
+        for i = 1:N-1
+            delta = phases(i) - phases(i+1:end);   % phi_i - phi_j for all j>i
+            total = total + sum(cos(delta));
+        end
+        ppc = 2 * total / (N*(N-1));
 
-    % PPC formula
-    PPC = (2 / (N * (N - 1))) * pairwise_sum;
+    case 'plv'       % Eq. 4 from many papers (N/(N-1)*(PLV² - 1/N))
+        % Very common in reviews and methods sections
+        plv = abs(mean(exp(1j*phases)));
+        ppc = (N/(N-1)) * (plv.^2 - 1/N);
+
+    otherwise
+        error('Unknown method');
+end
+
 end
 
 function [PPC, preferred_phase, PPC_CI_lower, PPC_CI_upper] = calculate_PPC_with_CI(phases, n_bootstrap, ci_level)
