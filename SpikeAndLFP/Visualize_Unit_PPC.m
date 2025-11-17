@@ -270,36 +270,47 @@ fprintf('  ✓ Saved: Figure3_Preferred_Phase_Analysis.png\n');
 
 fprintf('Creating Figure 4: Comprehensive Unit × Frequency Heatmap...\n');
 
+% CONFIGURABLE: Select which periods to include in heatmap (default: 1-4)
+periods_to_include = 1:4;
+
 fig4 = figure('Position', [200, 200, 1800, 900]);
 sgtitle('PPC Overview: Units × Frequencies', 'FontSize', 16, 'FontWeight', 'bold');
 
-% Create heatmap for Aversive (focus on Period 1)
+% Create heatmap for Aversive (average across selected periods)
 subplot(1, 2, 1);
-aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
-if ~isempty(aversive_p1)
-    heatmap_data_av = createUnitFrequencyHeatmap(aversive_p1, unique_freqs);
+aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(aversive_selected)
+    heatmap_data_av = createUnitFrequencyHeatmap(aversive_selected, unique_freqs);
     imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
     xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Aversive P%d (n=%d units)', periods_to_include, size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Aversive P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     xlim([0 20]);
 end
 
-% Create heatmap for Reward (focus on Period 1)
+% Create heatmap for Reward (average across selected periods)
 subplot(1, 2, 2);
-reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
-if ~isempty(reward_p1)
-    heatmap_data_rw = createUnitFrequencyHeatmap(reward_p1, unique_freqs);
+reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(reward_selected)
+    heatmap_data_rw = createUnitFrequencyHeatmap(reward_selected, unique_freqs);
     imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
     xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Reward P%d (n=%d units)', periods_to_include, size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Reward P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     xlim([0 20]);
 end
 

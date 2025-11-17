@@ -227,37 +227,52 @@ fprintf('  ✓ Saved: Figure3_Comprehensive_Heatmap.png\n');
 
 fprintf('Creating Figure 4: Unit × Features Heatmap...\n');
 
-fig4 = figure('Position', [200, 200, 1600, 1000]);
-sgtitle('All Units × All Features (Z-scored, Period 1)', 'FontSize', 16, 'FontWeight', 'bold');
+% CONFIGURABLE: Select which periods to include in heatmap (default: 1-4)
+periods_to_include = 1:4;
 
-% Create heatmap for Aversive P1
+fig4 = figure('Position', [200, 200, 1600, 1000]);
+if length(periods_to_include) == 1
+    sgtitle(sprintf('All Units × All Features (Z-scored, Period %d)', periods_to_include), 'FontSize', 16, 'FontWeight', 'bold');
+else
+    sgtitle(sprintf('All Units × All Features (Z-scored, Periods %d-%d avg)', min(periods_to_include), max(periods_to_include)), 'FontSize', 16, 'FontWeight', 'bold');
+end
+
+% Create heatmap for Aversive (average across selected periods)
 subplot(1, 2, 1);
-aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == categorical(1), :);
-if ~isempty(aversive_p1)
-    heatmap_data_av = createUnitFeaturesHeatmap(aversive_p1, all_metrics);
+aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, categorical(periods_to_include)), :);
+if ~isempty(aversive_selected)
+    heatmap_data_av = createUnitFeaturesHeatmap(aversive_selected, all_metrics);
     imagesc(heatmap_data_av);
     colorbar;
     caxis([-3, 3]);
     colormap(jet);
     xlabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Aversive P%d (n=%d units)', periods_to_include, size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Aversive P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
     set(gca, 'YTick', []);
 end
 
-% Create heatmap for Reward P1
+% Create heatmap for Reward (average across selected periods)
 subplot(1, 2, 2);
-reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == categorical(1), :);
-if ~isempty(reward_p1)
-    heatmap_data_rw = createUnitFeaturesHeatmap(reward_p1, all_metrics);
+reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, categorical(periods_to_include)), :);
+if ~isempty(reward_selected)
+    heatmap_data_rw = createUnitFeaturesHeatmap(reward_selected, all_metrics);
     imagesc(heatmap_data_rw);
     colorbar;
     caxis([-3, 3]);
     colormap(jet);
     xlabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Reward P%d (n=%d units)', periods_to_include, size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Reward P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
     set(gca, 'YTick', []);
 end

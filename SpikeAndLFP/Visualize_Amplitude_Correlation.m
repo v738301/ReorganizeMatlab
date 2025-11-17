@@ -255,39 +255,54 @@ fprintf('  ✓ Saved\n');
 
 fprintf('Creating Figure 5: Unit × Frequency Heatmap (Mutual Information)...\n');
 
-fig5 = figure('Position', [250, 250, 1800, 900]);
-sgtitle('Mutual Information: Units × Frequencies (Period 1)', 'FontSize', 16, 'FontWeight', 'bold');
+% CONFIGURABLE: Select which periods to include in heatmap (default: 1-4)
+periods_to_include = 1:4;
 
-% Aversive P1
+fig5 = figure('Position', [250, 250, 1800, 900]);
+if length(periods_to_include) == 1
+    sgtitle(sprintf('Mutual Information: Units × Frequencies (Period %d)', periods_to_include), 'FontSize', 16, 'FontWeight', 'bold');
+else
+    sgtitle(sprintf('Mutual Information: Units × Frequencies (Periods %d-%d avg)', min(periods_to_include), max(periods_to_include)), 'FontSize', 16, 'FontWeight', 'bold');
+end
+
+% Aversive (average across selected periods)
 subplot(1, 2, 1);
-aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
-if ~isempty(aversive_p1)
-    heatmap_data_av = createAmpCorrHeatmap(aversive_p1, unique_freqs);
+aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(aversive_selected)
+    heatmap_data_av = createAmpCorrHeatmap(aversive_selected, unique_freqs);
     imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
     xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Aversive P%d (n=%d units)', periods_to_include, size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Aversive P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     xlim([0 20]);
     hold on;
     plot([8 8], ylim, 'k--', 'LineWidth', 2);
     hold off;
 end
 
-% Reward P1
+% Reward (average across selected periods)
 subplot(1, 2, 2);
-reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
-if ~isempty(reward_p1)
-    heatmap_data_rw = createAmpCorrHeatmap(reward_p1, unique_freqs);
+reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(reward_selected)
+    heatmap_data_rw = createAmpCorrHeatmap(reward_selected, unique_freqs);
     imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
     xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
     ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
-    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Reward P%d (n=%d units)', periods_to_include, size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Reward P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
     xlim([0 20]);
     hold on;
     plot([8 8], ylim, 'k--', 'LineWidth', 2);
