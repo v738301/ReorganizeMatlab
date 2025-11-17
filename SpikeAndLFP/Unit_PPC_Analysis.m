@@ -179,6 +179,7 @@ for sess_idx = 1:num_aversive_sessions
     phase_signals = cell(n_bands, 1);
 
     for band_idx = 1:n_bands
+        fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
         band_range = config.frequency_bands{band_idx, 2};
 
         % Apply unified FIR bandpass filtering
@@ -188,14 +189,12 @@ for sess_idx = 1:num_aversive_sessions
         analytic_signal = hilbert(LFP_filtered);
         phase_signals{band_idx} = angle(analytic_signal);  % Phase in radians [-π, π]
 
-        if mod(band_idx, 30) == 0
-            fprintf('    Processed %d/%d bands...\n', band_idx, n_bands);
-        end
     end
     fprintf('  ✓ All phase signals computed\n');
 
     % Process each unit
     for unit_idx = 1:n_units
+        fprintf('    Processed %d/%d Units...\n', unit_idx, n_units);
         spike_times = valid_spikes{unit_idx};
 
         if isempty(spike_times)
