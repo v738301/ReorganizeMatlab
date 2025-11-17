@@ -250,6 +250,54 @@ saveas(fig4, fullfile(output_dir, 'Figure4_8Hz_Detailed_Analysis.png'));
 fprintf('  ✓ Saved\n');
 
 %% ========================================================================
+%  FIGURE 5: UNIT × FREQUENCY HEATMAP (Mutual Information)
+%  ========================================================================
+
+fprintf('Creating Figure 5: Unit × Frequency Heatmap (Mutual Information)...\n');
+
+fig5 = figure('Position', [250, 250, 1800, 900]);
+sgtitle('Mutual Information: Units × Frequencies (Period 1)', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Aversive P1
+subplot(1, 2, 1);
+aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
+if ~isempty(aversive_p1)
+    heatmap_data_av = createAmpCorrHeatmap(aversive_p1, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    xlim([0 20]);
+    hold on;
+    plot([8 8], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+% Reward P1
+subplot(1, 2, 2);
+reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
+if ~isempty(reward_p1)
+    heatmap_data_rw = createAmpCorrHeatmap(reward_p1, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    xlim([0 20]);
+    hold on;
+    plot([8 8], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+saveas(fig5, fullfile(output_dir, 'Figure5_Unit_Frequency_MI_Heatmap.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
 %  COMPLETION
 %  ========================================================================
 
@@ -397,4 +445,35 @@ function plot_8hz_comparison(data_8hz, variable_name, ylabel_text, color_aversiv
     title(sprintf('8 Hz: %s', ylabel_text), 'FontSize', 12, 'FontWeight', 'bold');
     grid on; box on;
     xlim([0.5 2.5]);
+end
+
+function heatmap_data = createAmpCorrHeatmap(data, unique_freqs)
+% Create heatmap matrix: units × frequencies (Mutual Information)
+%
+% INPUTS:
+%   data         - Table with amplitude correlation data for one period
+%   unique_freqs - Vector of unique frequency values
+%
+% OUTPUTS:
+%   heatmap_data - Matrix (n_units × n_freqs) of MI values
+
+    unique_units = unique(data.Unit);
+    n_units = length(unique_units);
+    n_freqs = length(unique_freqs);
+
+    heatmap_data = nan(n_units, n_freqs);
+
+    for u = 1:n_units
+        unit_data = data(data.Unit == unique_units(u), :);
+
+        for f = 1:n_freqs
+            freq = unique_freqs(f);
+            freq_center = (data.Freq_Low_Hz + data.Freq_High_Hz) / 2;
+            freq_data = unit_data(abs(freq_center(unit_data.Unit == unique_units(u)) - freq) < 0.1, :);
+
+            if ~isempty(freq_data)
+                heatmap_data(u, f) = mean(freq_data.Mutual_Info, 'omitnan');
+            end
+        end
+    end
 end

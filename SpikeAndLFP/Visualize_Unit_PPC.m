@@ -264,6 +264,47 @@ end
 saveas(fig3, fullfile(output_dir, 'Figure3_Preferred_Phase_Analysis.png'));
 fprintf('  ✓ Saved: Figure3_Preferred_Phase_Analysis.png\n');
 
+%% ========================================================================
+%  FIGURE 4: COMPREHENSIVE HEATMAP (Units × Frequencies)
+%  ========================================================================
+
+fprintf('Creating Figure 4: Comprehensive Unit × Frequency Heatmap...\n');
+
+fig4 = figure('Position', [200, 200, 1800, 900]);
+sgtitle('PPC Overview: Units × Frequencies', 'FontSize', 16, 'FontWeight', 'bold');
+
+% Create heatmap for Aversive (focus on Period 1)
+subplot(1, 2, 1);
+aversive_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
+if ~isempty(aversive_p1)
+    heatmap_data_av = createUnitFrequencyHeatmap(aversive_p1, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Aversive P1 (n=' + string(size(heatmap_data_av, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    xlim([0 20]);
+end
+
+% Create heatmap for Reward (focus on Period 1)
+subplot(1, 2, 2);
+reward_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
+if ~isempty(reward_p1)
+    heatmap_data_rw = createUnitFrequencyHeatmap(reward_p1, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    title('Reward P1 (n=' + string(size(heatmap_data_rw, 1)) + ' units)', 'FontSize', 13, 'FontWeight', 'bold');
+    xlim([0 20]);
+end
+
+saveas(fig4, fullfile(output_dir, 'Figure4_Unit_Frequency_Heatmap.png'));
+fprintf('  ✓ Saved: Figure4_Unit_Frequency_Heatmap.png\n');
 
 %% ========================================================================
 %  SECTION 3: SUMMARY STATISTICS
@@ -607,4 +648,34 @@ function plotSessionHeatmap(data, n_periods, label)
     set(gca, 'XTick', 1:n_periods);
     set(gca, 'YTick', 1:n_sessions);
     set(gca, 'YDir', 'normal');
+end
+
+function heatmap_data = createUnitFrequencyHeatmap(data, unique_freqs)
+% Create heatmap matrix: units × frequencies
+%
+% INPUTS:
+%   data         - Table with PPC data for one period
+%   unique_freqs - Vector of unique frequency values
+%
+% OUTPUTS:
+%   heatmap_data - Matrix (n_units × n_freqs) of PPC values
+
+    unique_units = unique(data.Unit);
+    n_units = length(unique_units);
+    n_freqs = length(unique_freqs);
+
+    heatmap_data = nan(n_units, n_freqs);
+
+    for u = 1:n_units
+        unit_data = data(data.Unit == unique_units(u), :);
+
+        for f = 1:n_freqs
+            freq = unique_freqs(f);
+            freq_data = unit_data(unit_data.Freq_Low_Hz == freq, :);
+
+            if ~isempty(freq_data)
+                heatmap_data(u, f) = mean(freq_data.PPC, 'omitnan');
+            end
+        end
+    end
 end
