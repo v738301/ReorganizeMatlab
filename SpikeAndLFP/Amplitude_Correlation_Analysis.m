@@ -244,24 +244,36 @@ fprintf('========================================\n');
 function session_results = compute_amplitude_correlation(NeuralTime, LFP, valid_spikes, ...
                                                           period_boundaries, n_periods, n_units, Fs, config)
 % Compute amplitude-spike rate correlation and mutual information
+% OPTIMIZED VERSION: Pre-allocated arrays, vectorized operations
 
     n_bands = size(config.frequency_bands, 1);
 
-    % Pre-allocate
+    % Estimate maximum number of results (pre-allocate)
+    max_results = n_bands * n_units * n_periods;
+
+    % Pre-allocate arrays (MAJOR SPEEDUP: avoid dynamic growth)
     amp_data = struct();
-    amp_data.unit = [];
-    amp_data.period = [];
-    amp_data.band_name = {};
-    amp_data.freq_low = [];
-    amp_data.freq_high = [];
-    amp_data.pearson_r = [];
-    amp_data.pearson_p = [];
-    amp_data.mutual_info = [];
-    amp_data.n_bins = [];
+    amp_data.unit = zeros(max_results, 1);
+    amp_data.period = zeros(max_results, 1);
+    amp_data.band_name = cell(max_results, 1);
+    amp_data.freq_low = zeros(max_results, 1);
+    amp_data.freq_high = zeros(max_results, 1);
+    amp_data.pearson_r = zeros(max_results, 1);
+    amp_data.pearson_p = zeros(max_results, 1);
+    amp_data.mutual_info = zeros(max_results, 1);
+    amp_data.n_bins = zeros(max_results, 1);
+
+    result_idx = 0;  % Counter for actual results
 
     fprintf('  Computing amplitude correlations for %d bands...\n', n_bands);
 
+    % Pre-compute time mapping (avoid repeated interp1 calls)
+    t0 = NeuralTime(1);
+    dt = median(diff(NeuralTime));
+
     % Process each frequency band
+    % NOTE: To enable parallel processing, change 'for' to 'parfor' below
+    % and ensure Parallel Computing Toolbox is available
     for band_idx = 1:n_bands
         band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
@@ -269,9 +281,7 @@ function session_results = compute_amplitude_correlation(NeuralTime, LFP, valid_
         % Filter LFP and extract amplitude envelope
         LFP_filtered = filter_LFP_for_amplitude(LFP, band_range, Fs);
         amplitude_envelope = abs(hilbert(LFP_filtered));
-
-        % Clear filtered signal
-        clear LFP_filtered;
+        clear LFP_filtered;  % Free memory immediately
 
         % Process each unit
         for unit_idx = 1:n_units
@@ -295,35 +305,38 @@ function session_results = compute_amplitude_correlation(NeuralTime, LFP, valid_
                 spike_counts = histcounts(spike_times, bin_edges);
                 spike_rate = spike_counts / config.bin_size;  % Hz
 
-                % Sample amplitude at bin centers
+                % Sample amplitude at bin centers (OPTIMIZED: use index math)
                 bin_centers = (bin_edges(1:end-1) + bin_edges(2:end)) / 2;
-                amp_indices = interp1(NeuralTime, 1:length(NeuralTime), bin_centers, 'nearest', 'extrap');
-                amp_indices = round(amp_indices);
-                amp_indices = amp_indices(amp_indices > 0 & amp_indices <= length(amplitude_envelope));
+                amp_indices = round((bin_centers - t0) / dt) + 1;
+
+                % Clip indices to valid range
+                valid_mask = amp_indices > 0 & amp_indices <= length(amplitude_envelope);
+                amp_indices = amp_indices(valid_mask);
+                spike_rate_clipped = spike_rate(valid_mask);
 
                 if length(amp_indices) < config.min_bins
                     continue;
                 end
 
                 amp_values = amplitude_envelope(amp_indices);
-                spike_rate = spike_rate(1:length(amp_values));  % Match lengths
 
                 % Compute Pearson correlation (linear)
-                [r, p] = corr(amp_values(:), spike_rate(:));
+                [r, p] = corr(amp_values(:), spike_rate_clipped(:));
 
-                % Compute mutual information (nonlinear)
-                mi = compute_mutual_information(amp_values, spike_rate, config.mi_bins);
+                % Compute mutual information (nonlinear) - OPTIMIZED VERSION
+                mi = compute_mutual_information_fast(amp_values, spike_rate_clipped, config.mi_bins);
 
-                % Store
-                amp_data.unit(end+1) = unit_idx;
-                amp_data.period(end+1) = period_idx;
-                amp_data.band_name{end+1} = band_name;
-                amp_data.freq_low(end+1) = band_range(1);
-                amp_data.freq_high(end+1) = band_range(2);
-                amp_data.pearson_r(end+1) = r;
-                amp_data.pearson_p(end+1) = p;
-                amp_data.mutual_info(end+1) = mi;
-                amp_data.n_bins(end+1) = length(amp_values);
+                % Store results (pre-allocated, much faster)
+                result_idx = result_idx + 1;
+                amp_data.unit(result_idx) = unit_idx;
+                amp_data.period(result_idx) = period_idx;
+                amp_data.band_name{result_idx} = band_name;
+                amp_data.freq_low(result_idx) = band_range(1);
+                amp_data.freq_high(result_idx) = band_range(2);
+                amp_data.pearson_r(result_idx) = r;
+                amp_data.pearson_p(result_idx) = p;
+                amp_data.mutual_info(result_idx) = mi;
+                amp_data.n_bins(result_idx) = length(amp_values);
             end
         end
 
@@ -331,6 +344,17 @@ function session_results = compute_amplitude_correlation(NeuralTime, LFP, valid_
             fprintf('    Processed %d/%d bands\n', band_idx, n_bands);
         end
     end
+
+    % Trim pre-allocated arrays to actual size
+    amp_data.unit = amp_data.unit(1:result_idx);
+    amp_data.period = amp_data.period(1:result_idx);
+    amp_data.band_name = amp_data.band_name(1:result_idx);
+    amp_data.freq_low = amp_data.freq_low(1:result_idx);
+    amp_data.freq_high = amp_data.freq_high(1:result_idx);
+    amp_data.pearson_r = amp_data.pearson_r(1:result_idx);
+    amp_data.pearson_p = amp_data.pearson_p(1:result_idx);
+    amp_data.mutual_info = amp_data.mutual_info(1:result_idx);
+    amp_data.n_bins = amp_data.n_bins(1:result_idx);
 
     % Convert to table
     session_results.data = struct2table(amp_data);
@@ -361,8 +385,9 @@ function LFP_filtered = filter_LFP_for_amplitude(LFP, band_range, Fs)
     end
 end
 
-function MI = compute_mutual_information(X, Y, n_bins)
+function MI = compute_mutual_information_fast(X, Y, n_bins)
 % Compute mutual information between two continuous variables
+% OPTIMIZED VERSION: Uses accumarray instead of loops
 % MI = H(X) + H(Y) - H(X,Y) where H is entropy
 
     % Discretize into bins
@@ -382,25 +407,22 @@ function MI = compute_mutual_information(X, Y, n_bins)
         return;
     end
 
-    % Compute joint and marginal probabilities
+    % Compute joint probability using accumarray (MUCH FASTER than loops)
     N = length(X_discrete);
-    p_xy = zeros(n_bins, n_bins);
+    subs = [X_discrete(:), Y_discrete(:)];
+    p_xy = accumarray(subs, 1, [n_bins, n_bins]) / N;
 
-    for i = 1:N
-        p_xy(X_discrete(i), Y_discrete(i)) = p_xy(X_discrete(i), Y_discrete(i)) + 1;
-    end
-    p_xy = p_xy / N;
-
+    % Compute marginal probabilities
     p_x = sum(p_xy, 2);
     p_y = sum(p_xy, 1);
 
-    % Compute MI
+    % Compute MI using vectorized operations (FASTER)
+    % Only compute for non-zero joint probabilities
+    [i_idx, j_idx] = find(p_xy > 0);
     MI = 0;
-    for i = 1:n_bins
-        for j = 1:n_bins
-            if p_xy(i,j) > 0
-                MI = MI + p_xy(i,j) * log2(p_xy(i,j) / (p_x(i) * p_y(j)));
-            end
-        end
+    for k = 1:length(i_idx)
+        i = i_idx(k);
+        j = j_idx(k);
+        MI = MI + p_xy(i,j) * log2(p_xy(i,j) / (p_x(i) * p_y(j)));
     end
 end

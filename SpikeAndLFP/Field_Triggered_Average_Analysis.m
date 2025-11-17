@@ -243,24 +243,30 @@ fprintf('========================================\n');
 function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ...
                                                period_boundaries, n_periods, n_units, Fs, config)
 % Compute field-triggered average: spike rate as function of phase
+% OPTIMIZED VERSION: Pre-allocated arrays, vectorized operations
 
     n_bands = size(config.frequency_bands, 1);
     n_phase_bins = config.n_phase_bins;
     phase_edges = linspace(-pi, pi, n_phase_bins + 1);
     phase_centers = (phase_edges(1:end-1) + phase_edges(2:end)) / 2;
 
-    % Pre-allocate
+    % Estimate maximum number of results (pre-allocate)
+    max_results = n_bands * n_units * n_periods;
+
+    % Pre-allocate arrays (MAJOR SPEEDUP: avoid dynamic growth)
     fta_data = struct();
-    fta_data.unit = [];
-    fta_data.period = [];
-    fta_data.band_name = {};
-    fta_data.freq_low = [];
-    fta_data.freq_high = [];
-    fta_data.fta_curve = {};  % Cell array: spike rate vs phase
-    fta_data.phase_centers = {};  % Phase bin centers
-    fta_data.mean_vector_length = [];  % Measure of phase-locking
-    fta_data.preferred_phase = [];
-    fta_data.n_spikes = [];
+    fta_data.unit = zeros(max_results, 1);
+    fta_data.period = zeros(max_results, 1);
+    fta_data.band_name = cell(max_results, 1);
+    fta_data.freq_low = zeros(max_results, 1);
+    fta_data.freq_high = zeros(max_results, 1);
+    fta_data.fta_curve = cell(max_results, 1);  % Cell array: spike rate vs phase
+    fta_data.phase_centers = cell(max_results, 1);  % Phase bin centers
+    fta_data.mean_vector_length = zeros(max_results, 1);  % Measure of phase-locking
+    fta_data.preferred_phase = zeros(max_results, 1);
+    fta_data.n_spikes = zeros(max_results, 1);
+
+    result_idx = 0;  % Counter for actual results
 
     % Time mapping
     t0 = NeuralTime(1);
@@ -269,6 +275,7 @@ function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ..
     fprintf('  Computing FTA for %d bands...\n', n_bands);
 
     % Process each frequency band
+    % NOTE: To enable parallel processing, change 'for' to 'parfor' below
     for band_idx = 1:n_bands
         band_name = config.frequency_bands{band_idx, 1};
         band_range = config.frequency_bands{band_idx, 2};
@@ -276,9 +283,7 @@ function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ..
         % Filter LFP and extract phase
         LFP_filtered = filter_LFP_for_phase(LFP, band_range, Fs);
         phase_signal = angle(hilbert(LFP_filtered));
-
-        % Clear filtered signal to save memory
-        clear LFP_filtered;
+        clear LFP_filtered;  % Free memory immediately
 
         % Process each unit
         for unit_idx = 1:n_units
@@ -298,7 +303,7 @@ function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ..
                     continue;
                 end
 
-                % Convert spike times to indices
+                % Convert spike times to indices (already optimized)
                 spike_indices = round((spikes_in_period - t0) / dt) + 1;
                 spike_indices = spike_indices(spike_indices > 0 & spike_indices <= length(phase_signal));
 
@@ -312,21 +317,23 @@ function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ..
                 fta_curve = spike_counts / sum(spike_counts);
 
                 % Compute mean vector length (measure of phase-locking)
+                % OPTIMIZED: Vectorized complex exponential
                 mean_vector = mean(exp(1i * spike_phases));
                 mvl = abs(mean_vector);
                 preferred_phase = angle(mean_vector);
 
-                % Store
-                fta_data.unit(end+1) = unit_idx;
-                fta_data.period(end+1) = period_idx;
-                fta_data.band_name{end+1} = band_name;
-                fta_data.freq_low(end+1) = band_range(1);
-                fta_data.freq_high(end+1) = band_range(2);
-                fta_data.fta_curve{end+1} = fta_curve;
-                fta_data.phase_centers{end+1} = phase_centers;
-                fta_data.mean_vector_length(end+1) = mvl;
-                fta_data.preferred_phase(end+1) = preferred_phase;
-                fta_data.n_spikes(end+1) = n_spikes;
+                % Store results (pre-allocated, much faster)
+                result_idx = result_idx + 1;
+                fta_data.unit(result_idx) = unit_idx;
+                fta_data.period(result_idx) = period_idx;
+                fta_data.band_name{result_idx} = band_name;
+                fta_data.freq_low(result_idx) = band_range(1);
+                fta_data.freq_high(result_idx) = band_range(2);
+                fta_data.fta_curve{result_idx} = fta_curve;
+                fta_data.phase_centers{result_idx} = phase_centers;
+                fta_data.mean_vector_length(result_idx) = mvl;
+                fta_data.preferred_phase(result_idx) = preferred_phase;
+                fta_data.n_spikes(result_idx) = n_spikes;
             end
         end
 
@@ -334,6 +341,18 @@ function session_results = compute_FTA_session(NeuralTime, LFP, valid_spikes, ..
             fprintf('    Processed %d/%d bands\n', band_idx, n_bands);
         end
     end
+
+    % Trim pre-allocated arrays to actual size
+    fta_data.unit = fta_data.unit(1:result_idx);
+    fta_data.period = fta_data.period(1:result_idx);
+    fta_data.band_name = fta_data.band_name(1:result_idx);
+    fta_data.freq_low = fta_data.freq_low(1:result_idx);
+    fta_data.freq_high = fta_data.freq_high(1:result_idx);
+    fta_data.fta_curve = fta_data.fta_curve(1:result_idx);
+    fta_data.phase_centers = fta_data.phase_centers(1:result_idx);
+    fta_data.mean_vector_length = fta_data.mean_vector_length(1:result_idx);
+    fta_data.preferred_phase = fta_data.preferred_phase(1:result_idx);
+    fta_data.n_spikes = fta_data.n_spikes(1:result_idx);
 
     % Convert to table
     session_results.data = struct2table(fta_data);
