@@ -479,7 +479,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         amplitude_binned_8Hz = binContinuousSignal(amplitude_envelope_8Hz, NeuralTime, time_centers);
 
         % Apply ±1 sec kernel (same as continuous predictors)
-        amplitude_padded_8Hz = [zeros(n_bins_continuous, 1); amplitude_binned_8Hz; zeros(n_bins_continuous - 1, 1)];
+        amplitude_padded_8Hz = [zeros(n_bins_continuous, 1); amplitude_binned_8Hz(:); zeros(n_bins_continuous - 1, 1)];
         amplitude_convolved_8Hz = conv(amplitude_padded_8Hz, continuous_kernel, 'valid');
 
         % Smooth and normalize 8Hz
@@ -498,7 +498,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         amplitude_binned_1p5Hz = binContinuousSignal(amplitude_envelope_1p5Hz, NeuralTime, time_centers);
 
         % Apply ±1 sec kernel (same as continuous predictors)
-        amplitude_padded_1p5Hz = [zeros(n_bins_continuous, 1); amplitude_binned_1p5Hz; zeros(n_bins_continuous - 1, 1)];
+        amplitude_padded_1p5Hz = [zeros(n_bins_continuous, 1); amplitude_binned_1p5Hz(:); zeros(n_bins_continuous - 1, 1)];
         amplitude_convolved_1p5Hz = conv(amplitude_padded_1p5Hz, continuous_kernel, 'valid');
 
         % Smooth and normalize 1.5Hz
