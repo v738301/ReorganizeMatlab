@@ -38,12 +38,12 @@ config.bin_size = 0.05;                 % 50 ms bins
 config.unit_of_time = 's';
 
 % Event kernel parameters
-% IR1ON, IR2ON, WP1ON, WP2ON: 24 Gaussian basis functions (170ms HWHH, ±2 sec)
+% IR1ON, IR2ON, WP1ON, WP2ON: 24 Gaussian basis functions (240ms HWHH, ±2 sec)
 config.reward_kernel_type = 'gaussian_basis';
 config.reward_window_pre = 2.0;         % 2s pre-event
 config.reward_window_post = 2.0;        % 2s post-event
 config.n_reward_kernels = 24;           % 24 evenly spaced Gaussian basis functions
-config.reward_kernel_hwhh = 0.17;       % 170 ms half-width at half-height
+config.reward_kernel_hwhh = 0.24;       % 240 ms half-width at half-height
 
 % Aversive: Raised cosine (causal only)
 config.aversive_kernel_type = 'raised_cosine';
@@ -290,7 +290,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
     %% 1. EVENT PREDICTORS (shared by all models)
 
-    % Reward events: IR1ON, IR2ON, WP1ON, WP2ON (24 Gaussian basis kernels, -2~2 sec, 170ms HWHH)
+    % Reward events: IR1ON, IR2ON, WP1ON, WP2ON (24 Gaussian basis kernels, -2~2 sec, 240ms HWHH)
     reward_events = {IR1ON, IR2ON, WP1ON, WP2ON};
     reward_names = {'IR1ON', 'IR2ON', 'WP1ON', 'WP2ON'};
 
