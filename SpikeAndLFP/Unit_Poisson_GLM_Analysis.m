@@ -334,8 +334,8 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             kernel = reward_basis_kernels(:, k);
             kernel_flipped = flipud(kernel);  % Flip for proper temporal alignment
 
-            % Pad signal for convolution
-            n_bins_half = round(reward_window_total / 2 / config.bin_size);
+            % Pad signal for convolution (use actual kernel size, not window size)
+            n_bins_half = floor(length(kernel) / 2);
             event_padded = [zeros(n_bins_half, 1); event_indicator; zeros(n_bins_half, 1)];
             predictor_full = conv(event_padded, kernel_flipped, 'valid');
 
@@ -441,8 +441,8 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             kernel = continuous_basis_kernels(:, k);
             kernel_flipped = flipud(kernel);  % Flip for proper temporal alignment
 
-            % Pad signal for convolution
-            n_bins_half = round(config.continuous_window / config.bin_size);
+            % Pad signal for convolution (use actual kernel size, not window size)
+            n_bins_half = floor(length(kernel) / 2);
             signal_padded = [zeros(n_bins_half, 1); signal; zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
@@ -523,8 +523,8 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             kernel = continuous_basis_kernels(:, k);
             kernel_flipped = flipud(kernel);
 
-            % Pad signal for convolution
-            n_bins_half = round(config.continuous_window / config.bin_size);
+            % Pad signal for convolution (use actual kernel size, not window size)
+            n_bins_half = floor(length(kernel) / 2);
             signal_padded = [zeros(n_bins_half, 1); amplitude_binned_8Hz; zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
@@ -556,8 +556,8 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             kernel = continuous_basis_kernels(:, k);
             kernel_flipped = flipud(kernel);
 
-            % Pad signal for convolution
-            n_bins_half = round(config.continuous_window / config.bin_size);
+            % Pad signal for convolution (use actual kernel size, not window size)
+            n_bins_half = floor(length(kernel) / 2);
             signal_padded = [zeros(n_bins_half, 1); amplitude_binned_1p5Hz; zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
@@ -751,17 +751,26 @@ function basis_kernels = createGaussianBasisKernels(window_size, bin_size, hwhh,
 %
 % Output:
 %   basis_kernels: [n_bins × n_kernels] matrix of Gaussian basis functions
+%
+% Note: Kernel centers span from -window_size to +window_size, but the time
+%       vector extends beyond this range to prevent truncation at boundaries.
 
     % Convert HWHH to standard deviation
     % For Gaussian: HWHH = sigma * sqrt(2*ln(2))
     sigma = hwhh / sqrt(2 * log(2));
 
-    % Total bins for ±window_size
-    n_bins_half = round(window_size / bin_size);
+    % Extend time vector by 3*sigma on each side to capture full Gaussian tails
+    % (3*sigma captures ~99.7% of Gaussian)
+    padding = 3 * sigma;
+    extended_window = window_size + padding;
+
+    % Total bins for extended window
+    n_bins_half = round(extended_window / bin_size);
     total_bins = 2 * n_bins_half + 1;  % Include center bin
     time_vec = ((-n_bins_half):n_bins_half)' * bin_size;
 
-    % Create evenly spaced kernel centers across the window
+    % Create evenly spaced kernel centers WITHIN the original window range
+    % (not the extended range - we want kernels centered from -window_size to +window_size)
     kernel_centers = linspace(-window_size, window_size, n_kernels);
 
     % Initialize basis matrix
