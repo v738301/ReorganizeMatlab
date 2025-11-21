@@ -123,7 +123,6 @@ lossfun = @(w) negLogLikelihood_Poisson_grad(w, X, y, lambda_opt);
 
 % Use more verbose options for final fit
 opts_final = opts;
-opts_final.Display = 'off';
 [w, neglogli, ~, ~, ~, H] = fminunc(lossfun, w0, opts_final);
 
 fprintf('✓ Final model fitted successfully\n\n');
