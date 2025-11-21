@@ -2,11 +2,12 @@
 %  POISSON GLM ANALYSIS: Nested Model Comparison
 %  ========================================================================
 %
-%  Fits 4 nested Poisson GLMs to disentangle neural encoding:
-%    Model 1: Events only (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
-%    Model 2: Events + Kinematics (X,Y,Z speeds + coordinates + 2D XY & 1D Z spatial kernels)
-%    Model 3: Events + Kinematics + Breathing 8Hz
-%    Model 4: Events + Kinematics + Breathing + Spike History
+%  Fits 5 nested Poisson GLMs to disentangle neural encoding:
+%    Model 1: Bias + Spike History (autoregressive baseline)
+%    Model 2: Bias + Spike History + Events (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
+%    Model 3: Bias + Spike History + Events + Coordinates + Spatial kernels (2D XY & 1D Z)
+%    Model 4: Bias + Spike History + Events + Coordinates + Spatial + Speeds (X,Y,Z speeds)
+%    Model 5: Bias + Spike History + Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
 %
 %  Features:
 %    - Symmetric Gaussian kernel (-2~2 sec) for reward events (IR1/2ON, WP1/2ON)
@@ -60,7 +61,8 @@ config.max_iter = 500;                 % Increased for better convergence
 config.display_fitting = 'iter';
 
 % Breathing amplitude extraction
-config.breathing_band = [7.5, 8.5];     % 8Hz ± 0.5Hz band
+config.breathing_band_8Hz = [7.5, 8.5];     % 8Hz ± 0.5Hz band
+config.breathing_band_1p5Hz = [1.0, 2.0];   % 1.5Hz ± 0.5Hz band
 
 % Spike history parameters
 config.history_lags = 5;                % Number of history lags (250ms)
@@ -92,7 +94,8 @@ fprintf('  Reward events (IR/WP): Gaussian kernel [-%d, +%d] ms, std=%.1f s\n', 
 fprintf('  Aversive events: %d raised cosine basis [0, +%d] ms\n', ...
     config.n_basis_funcs, config.aversive_window_post * 1000);
 fprintf('  Continuous predictors: ±%d ms window\n', config.continuous_window * 1000);
-fprintf('  Breathing band: %.1f-%.1f Hz\n', config.breathing_band(1), config.breathing_band(2));
+fprintf('  Breathing 8Hz band: %.1f-%.1f Hz\n', config.breathing_band_8Hz(1), config.breathing_band_8Hz(2));
+fprintf('  Breathing 1.5Hz band: %.1f-%.1f Hz\n', config.breathing_band_1p5Hz(1), config.breathing_band_1p5Hz(2));
 fprintf('  Fitting method: Robust (GLMspiketools-style)\n');
 fprintf('  Regularization: %s\n\n', mat2str(config.use_regularization));
 
@@ -146,15 +149,16 @@ for session_type_idx = 1:2
         n_units = length(valid_spikes);
         fprintf('  Units: %d\n', n_units);
 
-        % Build design matrices for all 4 models
+        % Build design matrices for all 5 models
         fprintf('  Building design matrices...\n');
-        [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
+        [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             NeuralTime, IR1ON, IR2ON, WP1ON, WP2ON, AversiveSound, AdjustedXYZ, AdjustedXYZ_speed, Signal, Fs, config);
 
-        fprintf('    Model 1: %d predictors (events only)\n', size(DM1, 2));
-        fprintf('    Model 2: %d predictors (events + kinematics)\n', size(DM2, 2));
-        fprintf('    Model 3: %d predictors (events + kinematics + breathing)\n', size(DM3, 2));
-        fprintf('    Model 4: %d predictors (full model + spike history)\n', size(DM3, 2) + config.history_lags);
+        fprintf('    Model 1: %d predictors (bias + spike history)\n', 1 + config.history_lags);
+        fprintf('    Model 2: %d predictors (+ events)\n', 1 + config.history_lags + size(DM1, 2));
+        fprintf('    Model 3: %d predictors (+ coordinates + spatial)\n', 1 + config.history_lags + size(DM2, 2));
+        fprintf('    Model 4: %d predictors (+ speeds)\n', 1 + config.history_lags + size(DM3, 2));
+        fprintf('    Model 5: %d predictors (+ breathing)\n', 1 + config.history_lags + size(DM4, 2));
 
         % Process each unit
         for unit_idx = 1:n_units
@@ -175,10 +179,10 @@ for session_type_idx = 1:2
 
             unit_counter = unit_counter + 1;
 
-            % Fit 4 nested models using robust method (GLMspiketools-style)
+            % Fit 5 nested models using robust method (GLMspiketools-style)
             try
-                [model1, model2, model3, model4] = fitNestedModels_robust(...
-                    spike_counts, DM1, DM2, DM3, config);
+                [model1, model2, model3, model4, model5] = fitNestedModels_robust(...
+                    spike_counts, DM1, DM2, DM3, DM4, config);
 
                 % Store results
                 all_results(unit_counter).session_name = allfiles(sess_idx).name;
@@ -186,17 +190,20 @@ for session_type_idx = 1:2
                 all_results(unit_counter).unit_idx = unit_idx;
                 all_results(unit_counter).mean_firing_rate = mean_fr;
 
-                % Model 1: Events only
+                % Model 1: Bias + Spike History
                 all_results(unit_counter).model1 = model1;
 
-                % Model 2: Events + Speed
+                % Model 2: + Events
                 all_results(unit_counter).model2 = model2;
 
-                % Model 3: Events + Speed + Breathing
+                % Model 3: + Coordinates + Spatial
                 all_results(unit_counter).model3 = model3;
 
-                % Model 4: Full model + Spike History
+                % Model 4: + Speeds
                 all_results(unit_counter).model4 = model4;
+
+                % Model 5: + Breathing
+                all_results(unit_counter).model5 = model5;
 
                 % Store predictor info
                 all_results(unit_counter).predictor_info = predictor_info;
@@ -238,16 +245,19 @@ dev_model1 = mean(arrayfun(@(s) s.model1.deviance_explained, all_results));
 dev_model2 = mean(arrayfun(@(s) s.model2.deviance_explained, all_results));
 dev_model3 = mean(arrayfun(@(s) s.model3.deviance_explained, all_results));
 dev_model4 = mean(arrayfun(@(s) s.model4.deviance_explained, all_results));
+dev_model5 = mean(arrayfun(@(s) s.model5.deviance_explained, all_results));
 
 fprintf('Average Deviance Explained:\n');
-fprintf('  Model 1 (Events):                          %.2f%%\n', dev_model1);
-fprintf('  Model 2 (Events + Kinematics):             %.2f%%\n', dev_model2);
-fprintf('  Model 3 (Events + Kinematics + Breathing): %.2f%%\n', dev_model3);
-fprintf('  Model 4 (Full + Spike History):            %.2f%%\n', dev_model4);
+fprintf('  Model 1 (Bias + Spike History):                %.2f%%\n', dev_model1);
+fprintf('  Model 2 (+ Events):                            %.2f%%\n', dev_model2);
+fprintf('  Model 3 (+ Coordinates + Spatial):             %.2f%%\n', dev_model3);
+fprintf('  Model 4 (+ Speeds):                            %.2f%%\n', dev_model4);
+fprintf('  Model 5 (+ Breathing):                         %.2f%%\n', dev_model5);
 fprintf('\nAverage Improvement:\n');
-fprintf('  Kinematics adds:                           %.2f%%\n', dev_model2 - dev_model1);
-fprintf('  Breathing adds:                            %.2f%%\n', dev_model3 - dev_model2);
-fprintf('  Spike history adds:                        %.2f%%\n', dev_model4 - dev_model3);
+fprintf('  Events add:                                    %.2f%%\n', dev_model2 - dev_model1);
+fprintf('  Coordinates + Spatial add:                     %.2f%%\n', dev_model3 - dev_model2);
+fprintf('  Speeds add:                                    %.2f%%\n', dev_model4 - dev_model3);
+fprintf('  Breathing adds:                                %.2f%%\n', dev_model5 - dev_model4);
 
 fprintf('\nDone!\n');
 
@@ -256,14 +266,15 @@ fprintf('\nDone!\n');
 %  HELPER FUNCTIONS
 %% ========================================================================
 
-function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
+function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     NeuralTime, IR1ON, IR2ON, WP1ON, WP2ON, AversiveSound, AdjustedXYZ, Speed, Signal, Fs, config)
-% Build 3 nested design matrices (Model 4 adds spike history per-unit)
+% Build 4 nested design matrices (Model 1 adds spike history per-unit in fitNestedModels)
 %
-% Model 1: Events only (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
-% Model 2: Events + Kinematics (X,Y,Z speeds + X,Y,Z coordinates + spatial kernels)
-% Model 3: Events + Kinematics + Breathing 8Hz
-% Model 4: Events + Kinematics + Breathing + Spike History (added in fitNestedModels)
+% DM1: Events only (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
+% DM2: Events + Coordinates + Spatial kernels (2D XY & 1D Z)
+% DM3: Events + Coordinates + Spatial + Speeds (X,Y,Z speeds)
+% DM4: Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
+% Model 1 (bias + spike history) is created in fitNestedModels_robust
 
     % Create time bins
     t_start = NeuralTime(1);
@@ -447,37 +458,60 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
     % Combine spatial predictors
     spatial_predictors = [xy_spatial_predictors, z_spatial_predictors];
 
-    %% 4. BREATHING 8Hz AMPLITUDE
+    %% 4. BREATHING AMPLITUDE (8Hz and 1.5Hz)
 
     breathing_8Hz = zeros(n_bins, 1);
+    breathing_1p5Hz = zeros(n_bins, 1);
+
     if ~isempty(Signal) && Fs > 0
         % Extract breathing from channel 32
         breathing_signal = Signal(:, 32);
 
         % Bandpass filter at 8Hz
-        Signal_filtered = bandpass(breathing_signal, config.breathing_band, Fs, ...
+        Signal_filtered_8Hz = bandpass(breathing_signal, config.breathing_band_8Hz, Fs, ...
             'ImpulseResponse', 'fir', 'Steepness', 0.85);
 
-        % Hilbert envelope
-        amplitude_envelope = abs(hilbert(Signal_filtered));
+        % Hilbert envelope for 8Hz
+        amplitude_envelope_8Hz = abs(hilbert(Signal_filtered_8Hz));
 
-        % Bin, smooth, normalize
-        amplitude_binned = binContinuousSignal(amplitude_envelope, NeuralTime, time_centers);
-        amplitude_smoothed = smoothdata(amplitude_binned, 'gaussian', ...
+        % Bin, smooth, normalize 8Hz
+        amplitude_binned_8Hz = binContinuousSignal(amplitude_envelope_8Hz, NeuralTime, time_centers);
+        amplitude_smoothed_8Hz = smoothdata(amplitude_binned_8Hz, 'gaussian', ...
             round(config.smooth_window/config.bin_size));
-        breathing_8Hz = zscore(amplitude_smoothed);
+        breathing_8Hz = zscore(amplitude_smoothed_8Hz);
+
+        % Bandpass filter at 1.5Hz
+        Signal_filtered_1p5Hz = bandpass(breathing_signal, config.breathing_band_1p5Hz, Fs, ...
+            'ImpulseResponse', 'fir', 'Steepness', 0.85);
+
+        % Hilbert envelope for 1.5Hz
+        amplitude_envelope_1p5Hz = abs(hilbert(Signal_filtered_1p5Hz));
+
+        % Bin, smooth, normalize 1.5Hz
+        amplitude_binned_1p5Hz = binContinuousSignal(amplitude_envelope_1p5Hz, NeuralTime, time_centers);
+        amplitude_smoothed_1p5Hz = smoothdata(amplitude_binned_1p5Hz, 'gaussian', ...
+            round(config.smooth_window/config.bin_size));
+        breathing_1p5Hz = zscore(amplitude_smoothed_1p5Hz);
     end
 
     %% 5. ASSEMBLE NESTED MODELS
 
-    % Model 1: Bias + Events
-    DM1 = [ones(n_bins, 1), event_predictors];
+    % Separate coordinates and speeds from kinematics_predictors
+    % kinematics_predictors order: X_speed, Y_speed, Z_speed, X_coord, Y_coord, Z_coord
+    speed_predictors = kinematics_predictors(:, 1:3);  % X, Y, Z speeds
+    coord_predictors = kinematics_predictors(:, 4:6);  % X, Y, Z coordinates
 
-    % Model 2: Bias + Events + Kinematics (speeds + coordinates + spatial kernels)
-    DM2 = [ones(n_bins, 1), event_predictors, kinematics_predictors, spatial_predictors];
+    % DM1: Events only
+    DM1 = event_predictors;
 
-    % Model 3: Bias + Events + Kinematics + Breathing
-    DM3 = [ones(n_bins, 1), event_predictors, kinematics_predictors, spatial_predictors, breathing_8Hz(:)];
+    % DM2: Events + Coordinates + Spatial kernels
+    DM2 = [event_predictors, coord_predictors, spatial_predictors];
+
+    % DM3: Events + Coordinates + Spatial + Speeds
+    DM3 = [event_predictors, coord_predictors, spatial_predictors, speed_predictors];
+
+    % DM4: Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
+    DM4 = [event_predictors, coord_predictors, spatial_predictors, speed_predictors, breathing_8Hz(:), breathing_1p5Hz(:)];
 
     %% 6. PREDICTOR INFO
 
@@ -485,8 +519,9 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
     predictor_info.time_bins = time_bins;
     predictor_info.time_centers = time_centers;
 
-    % Predictor names for Model 3 (full model)
-    predictor_names = {'Bias'};
+    % Predictor names for Model 5 (full model)
+    % Note: Bias and spike history are added in fitNestedModels_robust
+    predictor_names = {};
 
     % Reward event predictors (Gaussian kernel, one predictor per event)
     for ev = 1:length(reward_names)
@@ -498,10 +533,10 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
         predictor_names{end+1} = sprintf('Aversive_basis%d', b);
     end
 
-    % Kinematics predictors
-    for i = 1:length(continuous_names)
-        predictor_names{end+1} = continuous_names{i};
-    end
+    % Coordinate predictors
+    predictor_names{end+1} = 'X_coord';
+    predictor_names{end+1} = 'Y_coord';
+    predictor_names{end+1} = 'Z_coord';
 
     % Spatial predictors
     for i = 1:n_spatial_bins_xy * n_spatial_bins_xy
@@ -511,8 +546,14 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
         predictor_names{end+1} = sprintf('Z_spatial_%d', i);
     end
 
+    % Speed predictors
+    predictor_names{end+1} = 'X_speed';
+    predictor_names{end+1} = 'Y_speed';
+    predictor_names{end+1} = 'Z_speed';
+
     % Breathing
     predictor_names{end+1} = 'Breathing_8Hz';
+    predictor_names{end+1} = 'Breathing_1.5Hz';
 
     predictor_info.predictor_names = predictor_names;
     predictor_info.reward_event_names = reward_names;

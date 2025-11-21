@@ -1,12 +1,13 @@
-function [model1, model2, model3, model4] = fitNestedModels_robust(spike_counts, DM1, DM2, DM3, config)
-% Fit 4 nested Poisson GLMs using robust optimization with analytical gradients
+function [model1, model2, model3, model4, model5] = fitNestedModels_robust(spike_counts, DM1, DM2, DM3, DM4, config)
+% Fit 5 nested Poisson GLMs using robust optimization with analytical gradients
 % Adapted from Pillow Lab's GLMspiketools
 %
-% NESTED MODEL STRUCTURE (NEW ORDER):
+% NESTED MODEL STRUCTURE:
 %   Model 1: Intercept + Spike History (autoregressive baseline)
 %   Model 2: Intercept + Spike History + Events (reward/aversion)
-%   Model 3: Intercept + Spike History + Events + Speed
-%   Model 4: Intercept + Spike History + Events + Speed + Breathing
+%   Model 3: Intercept + Spike History + Events + Coordinates + Spatial
+%   Model 4: Intercept + Spike History + Events + Coordinates + Spatial + Speeds
+%   Model 5: Intercept + Spike History + Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
 %
 % INTERCEPT (CONSTANT TERM):
 %   All models include an intercept β₀ representing the baseline log firing rate:
@@ -30,9 +31,10 @@ function [model1, model2, model3, model4] = fitNestedModels_robust(spike_counts,
 %
 % Inputs:
 %   spike_counts: [n_bins × 1] spike counts per bin
-%   DM1: [n_bins × n_event_predictors] Events only (IR1ON, IR2ON, Aversive)
-%   DM2: [n_bins × n_event_predictors+1] Events + Speed
-%   DM3: [n_bins × n_event_predictors+2] Events + Speed + Breathing
+%   DM1: [n_bins × n_event_predictors] Events only (IR1ON, IR2ON, WP1ON, WP2ON, Aversive)
+%   DM2: [n_bins × n_predictors] Events + Coordinates + Spatial
+%   DM3: [n_bins × n_predictors] Events + Coordinates + Spatial + Speeds
+%   DM4: [n_bins × n_predictors] Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
 %   config: Configuration struct with:
 %     - history_lags: number of spike history lags
 %     - use_regularization: whether to use ridge regularization
@@ -42,7 +44,7 @@ function [model1, model2, model3, model4] = fitNestedModels_robust(spike_counts,
 %     - display_fitting: display level ('off', 'iter', etc.)
 %
 % Outputs:
-%   model1, model2, model3, model4: Model structs with:
+%   model1, model2, model3, model4, model5: Model structs with:
 %     - coefficients: ML/ridge weight estimates
 %     - standard_errors: Standard errors from Hessian
 %     - z_scores: Coefficient z-scores (coefficient / SE)
@@ -177,14 +179,12 @@ if config.use_regularization
     fprintf('  Lambda: %.2e\n', model2.lambda);
 end
 
-%% Fit Model 3: Spike History + Events + Speed
-fprintf('\n--- Fitting Model 3: Spike History + Events + Speed ---\n');
+%% Fit Model 3: Spike History + Events + Coordinates + Spatial
+fprintf('\n--- Fitting Model 3: Spike History + Events + Coordinates + Spatial ---\n');
 
-% Design matrix: intercept + spike history + events + speed
-% DM2 = [DM1, Speed] (events + speed)
-% Extract speed predictor (last column of DM2)
-speed_predictor = DM2(:, end);
-DM_model3 = [ones(n_bins, 1), history_matrix, DM1, speed_predictor];
+% Design matrix: intercept + spike history + events + coordinates + spatial
+% DM2 = [DM1, Coordinates, Spatial] (events + coordinates + spatial kernels)
+DM_model3 = [ones(n_bins, 1), history_matrix, DM2];
 
 if config.use_regularization
     [w3, neglogli3, H3, lambda3, cv3] = fitPoissonGLM_ridge(DM_model3, spike_counts, ...
@@ -215,21 +215,19 @@ model3.LRT_df = model3.n_predictors - model2.n_predictors;
 model3.LRT_p_value = 1 - chi2cdf(model3.LRT_vs_previous, model3.LRT_df);
 
 fprintf('  Deviance explained: %.2f%%\n', model3.deviance_explained);
-fprintf('  Additional variance from Speed: %.2f%%\n', ...
+fprintf('  Additional variance from Coordinates + Spatial: %.2f%%\n', ...
     model3.deviance_explained - model2.deviance_explained);
 fprintf('  Log-likelihood: %.2f\n', model3.log_likelihood);
 if config.use_regularization
     fprintf('  Lambda: %.2e\n', model3.lambda);
 end
 
-%% Fit Model 4: Spike History + Events + Speed + Breathing
-fprintf('\n--- Fitting Model 4: Full model (+ Breathing) ---\n');
+%% Fit Model 4: Spike History + Events + Coordinates + Spatial + Speeds
+fprintf('\n--- Fitting Model 4: + Speeds ---\n');
 
-% Design matrix: intercept + spike history + events + speed + breathing
-% DM3 = [DM1, Speed, Breathing]
-% Extract breathing predictor (last column of DM3)
-breathing_predictor = DM3(:, end);
-DM_model4 = [ones(n_bins, 1), history_matrix, DM1, speed_predictor, breathing_predictor];
+% Design matrix: intercept + spike history + events + coordinates + spatial + speeds
+% DM3 = [DM2, Speeds] (events + coordinates + spatial + speeds)
+DM_model4 = [ones(n_bins, 1), history_matrix, DM3];
 
 if config.use_regularization
     [w4, neglogli4, H4, lambda4, cv4] = fitPoissonGLM_ridge(DM_model4, spike_counts, ...
@@ -260,36 +258,83 @@ model4.LRT_df = model4.n_predictors - model3.n_predictors;
 model4.LRT_p_value = 1 - chi2cdf(model4.LRT_vs_previous, model4.LRT_df);
 
 fprintf('  Deviance explained: %.2f%%\n', model4.deviance_explained);
-fprintf('  Additional variance from Breathing: %.2f%%\n', ...
+fprintf('  Additional variance from Speeds: %.2f%%\n', ...
     model4.deviance_explained - model3.deviance_explained);
 fprintf('  Log-likelihood: %.2f\n', model4.log_likelihood);
 if config.use_regularization
     fprintf('  Lambda: %.2e\n', model4.lambda);
 end
 
+%% Fit Model 5: Full model (+ Breathing)
+fprintf('\n--- Fitting Model 5: Full model (+ Breathing) ---\n');
+
+% Design matrix: intercept + spike history + events + coordinates + spatial + speeds + breathing
+% DM4 = [DM3, Breathing_8Hz, Breathing_1.5Hz]
+DM_model5 = [ones(n_bins, 1), history_matrix, DM4];
+
+if config.use_regularization
+    [w5, neglogli5, H5, lambda5, cv5] = fitPoissonGLM_ridge(DM_model5, spike_counts, ...
+        config.lambda_grid, config.cv_folds, opts);
+    model5.lambda = lambda5;
+    model5.cv_results = cv5;
+else
+    [w5, neglogli5, H5] = fitPoissonGLM_ML(DM_model5, spike_counts, [], opts);
+    model5.lambda = 0;
+end
+
+model5.coefficients = w5;
+model5.log_likelihood = -neglogli5;
+model5.deviance_explained = 100 * (1 - (-neglogli5 / null_ll));
+model5.n_predictors = length(w5);
+model5.hessian = H5;
+model5.standard_errors = sqrt(diag(inv(H5)));
+model5.z_scores = w5 ./ model5.standard_errors;
+model5.p_values = 2 * normcdf(-abs(model5.z_scores));
+
+% Model selection criteria
+model5.AIC = 2 * neglogli5 + 2 * model5.n_predictors;
+model5.BIC = 2 * neglogli5 + model5.n_predictors * log(n_bins);
+
+% Likelihood Ratio Test vs Model 4
+model5.LRT_vs_previous = -2 * (model4.log_likelihood - model5.log_likelihood);
+model5.LRT_df = model5.n_predictors - model4.n_predictors;
+model5.LRT_p_value = 1 - chi2cdf(model5.LRT_vs_previous, model5.LRT_df);
+
+fprintf('  Deviance explained: %.2f%%\n', model5.deviance_explained);
+fprintf('  Additional variance from Breathing: %.2f%%\n', ...
+    model5.deviance_explained - model4.deviance_explained);
+fprintf('  Log-likelihood: %.2f\n', model5.log_likelihood);
+if config.use_regularization
+    fprintf('  Lambda: %.2e\n', model5.lambda);
+end
+
 %% Summary
-fprintf('\n✓ All 4 nested models fitted successfully\n');
+fprintf('\n✓ All 5 nested models fitted successfully\n');
 fprintf('\n=== NESTED MODEL COMPARISON ===\n');
-fprintf('%-25s %8s %8s %8s %10s %8s\n', 'Model', 'Dev.Exp', 'AIC', 'BIC', 'LRT (χ²)', 'p-value');
-fprintf('%s\n', repmat('-', 1, 80));
-fprintf('%-25s %7.2f%% %8.1f %8.1f %10s %8s\n', ...
+fprintf('%-30s %8s %8s %8s %10s %8s\n', 'Model', 'Dev.Exp', 'AIC', 'BIC', 'LRT (χ²)', 'p-value');
+fprintf('%s\n', repmat('-', 1, 90));
+fprintf('%-30s %7.2f%% %8.1f %8.1f %10s %8s\n', ...
     '1. History', model1.deviance_explained, model1.AIC, model1.BIC, '-', '-');
-fprintf('%-25s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
+fprintf('%-30s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
     '2. + Events', model2.deviance_explained, model2.AIC, model2.BIC, ...
     model2.LRT_vs_previous, model2.LRT_p_value, ...
     getSignificanceStr(model2.LRT_p_value));
-fprintf('%-25s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
-    '3. + Speed', model3.deviance_explained, model3.AIC, model3.BIC, ...
+fprintf('%-30s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
+    '3. + Coord + Spatial', model3.deviance_explained, model3.AIC, model3.BIC, ...
     model3.LRT_vs_previous, model3.LRT_p_value, ...
     getSignificanceStr(model3.LRT_p_value));
-fprintf('%-25s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
-    '4. + Breathing', model4.deviance_explained, model4.AIC, model4.BIC, ...
+fprintf('%-30s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
+    '4. + Speeds', model4.deviance_explained, model4.AIC, model4.BIC, ...
     model4.LRT_vs_previous, model4.LRT_p_value, ...
     getSignificanceStr(model4.LRT_p_value));
-fprintf('%s\n', repmat('=', 1, 80));
+fprintf('%-30s %7.2f%% %8.1f %8.1f %10.2f %8.4f %s\n', ...
+    '5. + Breathing', model5.deviance_explained, model5.AIC, model5.BIC, ...
+    model5.LRT_vs_previous, model5.LRT_p_value, ...
+    getSignificanceStr(model5.LRT_p_value));
+fprintf('%s\n', repmat('=', 1, 90));
 fprintf('\nModel Selection:\n');
-[~, aic_best] = min([model1.AIC, model2.AIC, model3.AIC, model4.AIC]);
-[~, bic_best] = min([model1.BIC, model2.BIC, model3.BIC, model4.BIC]);
+[~, aic_best] = min([model1.AIC, model2.AIC, model3.AIC, model4.AIC, model5.AIC]);
+[~, bic_best] = min([model1.BIC, model2.BIC, model3.BIC, model4.BIC, model5.BIC]);
 fprintf('  Best by AIC: Model %d\n', aic_best);
 fprintf('  Best by BIC: Model %d (more conservative)\n', bic_best);
 
