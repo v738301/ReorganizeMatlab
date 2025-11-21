@@ -379,7 +379,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     aversive_predictors = [];
     for b = 1:n_basis
         kernel = basis_funcs(:, b);
-        kernel_flipped = flipud(kernel);  % Flip for causal convolution
+        kernel_flipped = kernel;  % Flip for causal convolution
         % Pad only at the end for causal response
         aversive_padded = [aversive_indicator; zeros(n_bins_post_aversive, 1)];
         predictor_full = conv(aversive_padded, kernel_flipped, 'full');
