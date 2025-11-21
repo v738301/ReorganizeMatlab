@@ -430,8 +430,8 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
     end
 
     % 1D Z spatial kernel (height-dependent tuning)
-    n_spatial_bins_z = 5;  % 5 vertical bins
-    z_edges = linspace(min(Z_coord), max(Z_coord), n_spatial_bins_z + 1);
+    n_spatial_bins_z = 10;  % 10 vertical bins
+    z_edges = linspace(0, 100, n_spatial_bins_z + 1);
 
     % Bin Z positions
     [~, ~, z_bin_idx] = histcounts(Z_coord_binned, z_edges);
