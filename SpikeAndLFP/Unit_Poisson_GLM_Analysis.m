@@ -78,8 +78,8 @@ config.bout_minPts = 2;                 % Minimum events to form a bout
 
 % Robust GLM fitting options (adapted from GLMspiketools)
 config.use_regularization = true;      % Set to true to use L2 ridge regularization
-config.lambda_grid = 2.^(-5:15);        % Regularization grid for cross-validation
-config.lambda_grid = 2.^(0);        % Regularization grid for cross-validation
+config.lambda_grid = 2.^(-5:15);        % Regularization grid for cross-validation              
+config.lambda_grid = 2.^7;             % Regularization grid for cross-validation
 config.cv_folds = 1;                    % Number of cross-validation folds
 
 % Data paths
