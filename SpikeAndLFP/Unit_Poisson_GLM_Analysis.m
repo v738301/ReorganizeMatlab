@@ -13,6 +13,7 @@
 %    - Symmetric Gaussian kernel (-2~2 sec) for reward events (IR1/2ON, WP1/2ON)
 %    - Raised cosine basis (0~2 sec) for aversive events
 %    - Continuous kinematics with -1~1 sec kernel (X,Y,Z speeds & coordinates)
+%    - Breathing signals (8Hz + 1.5Hz) with -1~1 sec kernel
 %    - 2D XY spatial kernel (10x10 grid) and 1D Z spatial kernel (5 bins)
 %    - Processes ALL units across all sessions
 %    - Computes deviance explained for model comparison
@@ -458,7 +459,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     % Combine spatial predictors
     spatial_predictors = [xy_spatial_predictors, z_spatial_predictors];
 
-    %% 4. BREATHING AMPLITUDE (8Hz and 1.5Hz)
+    %% 4. BREATHING AMPLITUDE (8Hz and 1.5Hz) with ±1 sec kernel
 
     breathing_8Hz = zeros(n_bins, 1);
     breathing_1p5Hz = zeros(n_bins, 1);
@@ -474,9 +475,15 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         % Hilbert envelope for 8Hz
         amplitude_envelope_8Hz = abs(hilbert(Signal_filtered_8Hz));
 
-        % Bin, smooth, normalize 8Hz
+        % Bin 8Hz
         amplitude_binned_8Hz = binContinuousSignal(amplitude_envelope_8Hz, NeuralTime, time_centers);
-        amplitude_smoothed_8Hz = smoothdata(amplitude_binned_8Hz, 'gaussian', ...
+
+        % Apply ±1 sec kernel (same as continuous predictors)
+        amplitude_padded_8Hz = [zeros(n_bins_continuous, 1); amplitude_binned_8Hz; zeros(n_bins_continuous - 1, 1)];
+        amplitude_convolved_8Hz = conv(amplitude_padded_8Hz, continuous_kernel, 'valid');
+
+        % Smooth and normalize 8Hz
+        amplitude_smoothed_8Hz = smoothdata(amplitude_convolved_8Hz, 'gaussian', ...
             round(config.smooth_window/config.bin_size));
         breathing_8Hz = zscore(amplitude_smoothed_8Hz);
 
@@ -487,9 +494,15 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         % Hilbert envelope for 1.5Hz
         amplitude_envelope_1p5Hz = abs(hilbert(Signal_filtered_1p5Hz));
 
-        % Bin, smooth, normalize 1.5Hz
+        % Bin 1.5Hz
         amplitude_binned_1p5Hz = binContinuousSignal(amplitude_envelope_1p5Hz, NeuralTime, time_centers);
-        amplitude_smoothed_1p5Hz = smoothdata(amplitude_binned_1p5Hz, 'gaussian', ...
+
+        % Apply ±1 sec kernel (same as continuous predictors)
+        amplitude_padded_1p5Hz = [zeros(n_bins_continuous, 1); amplitude_binned_1p5Hz; zeros(n_bins_continuous - 1, 1)];
+        amplitude_convolved_1p5Hz = conv(amplitude_padded_1p5Hz, continuous_kernel, 'valid');
+
+        % Smooth and normalize 1.5Hz
+        amplitude_smoothed_1p5Hz = smoothdata(amplitude_convolved_1p5Hz, 'gaussian', ...
             round(config.smooth_window/config.bin_size));
         breathing_1p5Hz = zscore(amplitude_smoothed_1p5Hz);
     end
