@@ -443,7 +443,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
             % Pad signal for convolution (use actual kernel size, not window size)
             n_bins_half = floor(length(kernel) / 2);
-            signal_padded = [zeros(n_bins_half, 1); signal; zeros(n_bins_half, 1)];
+            signal_padded = [zeros(n_bins_half, 1); signal(:); zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
             % Ensure correct length
@@ -525,7 +525,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
             % Pad signal for convolution (use actual kernel size, not window size)
             n_bins_half = floor(length(kernel) / 2);
-            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_8Hz; zeros(n_bins_half, 1)];
+            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_8Hz(:); zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
             % Ensure correct length
@@ -558,7 +558,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
             % Pad signal for convolution (use actual kernel size, not window size)
             n_bins_half = floor(length(kernel) / 2);
-            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_1p5Hz; zeros(n_bins_half, 1)];
+            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_1p5Hz(:); zeros(n_bins_half, 1)];
             predictor_full = conv(signal_padded, kernel_flipped, 'valid');
 
             % Ensure correct length
@@ -623,10 +623,10 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     end
 
     % Coordinate predictors (each has 8 kernels)
-    for i = 1:length({'X_coord', 'Y_coord', 'Z_coord'})
-        coord_name = {'X_coord', 'Y_coord', 'Z_coord'}{i};
+    coord_name = {'X_coord', 'Y_coord', 'Z_coord'};
+    for i = 1:length(coord_name)
         for k = 1:n_kernels
-            predictor_names{end+1} = sprintf('%s_kernel%d', coord_name, k);
+            predictor_names{end+1} = sprintf('%s_kernel%d', coord_name{i}, k);
         end
     end
 
@@ -639,10 +639,10 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     end
 
     % Speed predictors (each has 8 kernels)
-    for i = 1:length({'X_speed', 'Y_speed', 'Z_speed'})
-        speed_name = {'X_speed', 'Y_speed', 'Z_speed'}{i};
+    speed_name = {'X_speed', 'Y_speed', 'Z_speed'};
+    for i = 1:length(speed_name)
         for k = 1:n_kernels
-            predictor_names{end+1} = sprintf('%s_kernel%d', speed_name, k);
+            predictor_names{end+1} = sprintf('%s_kernel%d', speed_name{i}, k);
         end
     end
 
