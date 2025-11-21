@@ -38,11 +38,12 @@ config.bin_size = 0.05;                 % 50 ms bins
 config.unit_of_time = 's';
 
 % Event kernel parameters
-% IR1ON, IR2ON, WP1ON, WP2ON: Symmetric Gaussian kernel
-config.reward_kernel_type = 'gaussian';
+% IR1ON, IR2ON, WP1ON, WP2ON: 24 Gaussian basis functions (170ms HWHH, ±2 sec)
+config.reward_kernel_type = 'gaussian_basis';
 config.reward_window_pre = 2.0;         % 2s pre-event
 config.reward_window_post = 2.0;        % 2s post-event
-config.reward_gaussian_std = 0.5;       % Standard deviation for Gaussian kernel
+config.n_reward_kernels = 24;           % 24 evenly spaced Gaussian basis functions
+config.reward_kernel_hwhh = 0.17;       % 170 ms half-width at half-height
 
 % Aversive: Raised cosine (causal only)
 config.aversive_kernel_type = 'raised_cosine';
@@ -51,8 +52,10 @@ config.aversive_window_pre = 0;         % No pre-event window (causal only)
 config.aversive_window_post = 2.0;      % 2s post-event
 config.basis_stretch = 0.1;             % Log-stretching parameter
 
-% Continuous predictor kernel (-1 to +1 sec)
+% Continuous predictor kernel (-1 to +1 sec with 8 separate Gaussian kernels)
 config.continuous_window = 1.0;         % ±1s window for continuous predictors
+config.n_continuous_kernels = 8;        % 8 separate Gaussian basis kernels
+config.continuous_kernel_hwhh = 0.24;   % 240 ms half-width at half-height
 
 % Continuous predictor smoothing
 config.smooth_window = 0.2;             % 200 ms smoothing
@@ -90,11 +93,12 @@ addpath('/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/behclassification/
 
 fprintf('Configuration:\n');
 fprintf('  Bin size: %d ms\n', config.bin_size * 1000);
-fprintf('  Reward events (IR/WP): Gaussian kernel [-%d, +%d] ms, std=%.1f s\n', ...
-    config.reward_window_pre * 1000, config.reward_window_post * 1000, config.reward_gaussian_std);
+fprintf('  Reward events (IR/WP): %d Gaussian basis kernels [-%d, +%d] ms, HWHH=%.1f ms\n', ...
+    config.n_reward_kernels, config.reward_window_pre * 1000, config.reward_window_post * 1000, config.reward_kernel_hwhh * 1000);
 fprintf('  Aversive events: %d raised cosine basis [0, +%d] ms\n', ...
     config.n_basis_funcs, config.aversive_window_post * 1000);
-fprintf('  Continuous predictors: ±%d ms window\n', config.continuous_window * 1000);
+fprintf('  Continuous predictors: %d Gaussian basis kernels ±%d ms, HWHH=%.1f ms\n', ...
+    config.n_continuous_kernels, config.continuous_window * 1000, config.continuous_kernel_hwhh * 1000);
 fprintf('  Breathing 8Hz band: %.1f-%.1f Hz\n', config.breathing_band_8Hz(1), config.breathing_band_8Hz(2));
 fprintf('  Breathing 1.5Hz band: %.1f-%.1f Hz\n', config.breathing_band_1p5Hz(1), config.breathing_band_1p5Hz(2));
 fprintf('  Fitting method: Robust (GLMspiketools-style)\n');
@@ -286,17 +290,17 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
     %% 1. EVENT PREDICTORS (shared by all models)
 
-    % Reward events: IR1ON, IR2ON, WP1ON, WP2ON (Gaussian kernel -2~2 sec)
+    % Reward events: IR1ON, IR2ON, WP1ON, WP2ON (24 Gaussian basis kernels, -2~2 sec, 170ms HWHH)
     reward_events = {IR1ON, IR2ON, WP1ON, WP2ON};
     reward_names = {'IR1ON', 'IR2ON', 'WP1ON', 'WP2ON'};
 
-    % Create Gaussian kernel for reward events
-    n_bins_pre_reward = round(config.reward_window_pre / config.bin_size);
-    n_bins_post_reward = round(config.reward_window_post / config.bin_size);
-    gaussian_kernel = createGaussianKernel(n_bins_pre_reward, n_bins_post_reward, ...
-        config.bin_size, config.reward_gaussian_std);
+    % Create 24 Gaussian basis kernels for reward events
+    reward_window_total = config.reward_window_pre + config.reward_window_post;
+    reward_basis_kernels = createGaussianBasisKernels(...
+        reward_window_total / 2, config.bin_size, ...
+        config.reward_kernel_hwhh, config.n_reward_kernels);
 
-    % Convolve reward events with Gaussian kernel
+    % Convolve reward events with 24 Gaussian basis kernels
     reward_predictors = [];
     for ev = 1:length(reward_events)
         event_signal = reward_events{ev};
@@ -325,10 +329,25 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
             event_indicator = event_counts;
         end
 
-        % Convolve with Gaussian kernel
-        event_padded = [zeros(n_bins_pre_reward, 1); event_indicator; zeros(n_bins_post_reward - 1, 1)];
-        predictor = conv(event_padded, gaussian_kernel, 'valid');
-        reward_predictors = [reward_predictors, predictor];
+        % Convolve with each of the 24 Gaussian basis kernels
+        for k = 1:config.n_reward_kernels
+            kernel = reward_basis_kernels(:, k);
+            kernel_flipped = flipud(kernel);  % Flip for proper temporal alignment
+
+            % Pad signal for convolution
+            n_bins_half = round(reward_window_total / 2 / config.bin_size);
+            event_padded = [zeros(n_bins_half, 1); event_indicator; zeros(n_bins_half, 1)];
+            predictor_full = conv(event_padded, kernel_flipped, 'valid');
+
+            % Ensure correct length
+            if length(predictor_full) > n_bins
+                predictor_full = predictor_full(1:n_bins);
+            elseif length(predictor_full) < n_bins
+                predictor_full = [predictor_full; zeros(n_bins - length(predictor_full), 1)];
+            end
+
+            reward_predictors = [reward_predictors, predictor_full];
+        end
     end
 
     % Aversive event: raised cosine basis (0~2 sec, causal only)
@@ -356,11 +375,16 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     end
 
     % Convolve aversive with raised cosine basis functions
+    % Fix: Flip kernel for proper causal convolution (response AFTER event)
     aversive_predictors = [];
     for b = 1:n_basis
         kernel = basis_funcs(:, b);
-        aversive_padded = [zeros(n_bins_pre_aversive, 1); aversive_indicator; zeros(n_bins_post_aversive - 1, 1)];
-        predictor = conv(aversive_padded, kernel, 'valid');
+        kernel_flipped = flipud(kernel);  % Flip for causal convolution
+        % Pad only at the end for causal response
+        aversive_padded = [aversive_indicator; zeros(n_bins_post_aversive, 1)];
+        predictor_full = conv(aversive_padded, kernel_flipped, 'full');
+        % Extract valid portion (same length as n_bins)
+        predictor = predictor_full(1:n_bins);
         aversive_predictors = [aversive_predictors, predictor];
     end
 
@@ -398,12 +422,12 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     Y_speed_binned = binContinuousSignal(Y_speed, NeuralTime, time_centers);
     Z_speed_binned = binContinuousSignal(Z_speed, NeuralTime, time_centers);
 
-    % Create -1~1 sec kernel for continuous predictors
-    n_bins_continuous = round(config.continuous_window / config.bin_size);
-    continuous_kernel = createGaussianKernel(n_bins_continuous, n_bins_continuous, ...
-        config.bin_size, config.smooth_window);
+    % Create 8 separate Gaussian basis kernels for continuous predictors (±1 sec, 240ms HWHH each)
+    continuous_basis_kernels = createGaussianBasisKernels(...
+        config.continuous_window, config.bin_size, ...
+        config.continuous_kernel_hwhh, config.n_continuous_kernels);
 
-    % Convolve continuous signals with kernel
+    % Convolve continuous signals with each of the 8 kernels
     kinematics_predictors = [];
     continuous_signals = {X_speed_binned, Y_speed_binned, Z_speed_binned, ...
                           X_coord_binned, Y_coord_binned, Z_coord_binned};
@@ -411,13 +435,29 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
 
     for i = 1:length(continuous_signals)
         signal = continuous_signals{i};
-        % Pad and convolve
-        signal_padded = [zeros(n_bins_continuous, 1); signal; zeros(n_bins_continuous - 1, 1)];
-        predictor = conv(signal_padded, continuous_kernel, 'valid');
-        % Smooth and normalize
-        predictor_smoothed = smoothdata(predictor, 'gaussian', round(config.smooth_window/config.bin_size));
-        predictor_normalized = zscore(predictor_smoothed);
-        kinematics_predictors = [kinematics_predictors, predictor_normalized];
+
+        % Convolve with each of the 8 basis kernels
+        for k = 1:config.n_continuous_kernels
+            kernel = continuous_basis_kernels(:, k);
+            kernel_flipped = flipud(kernel);  % Flip for proper temporal alignment
+
+            % Pad signal for convolution
+            n_bins_half = round(config.continuous_window / config.bin_size);
+            signal_padded = [zeros(n_bins_half, 1); signal; zeros(n_bins_half, 1)];
+            predictor_full = conv(signal_padded, kernel_flipped, 'valid');
+
+            % Ensure correct length
+            if length(predictor_full) > n_bins
+                predictor_full = predictor_full(1:n_bins);
+            elseif length(predictor_full) < n_bins
+                predictor_full = [predictor_full; zeros(n_bins - length(predictor_full), 1)];
+            end
+
+            % Smooth and normalize
+            predictor_smoothed = smoothdata(predictor_full, 'gaussian', round(config.smooth_window/config.bin_size));
+            predictor_normalized = zscore(predictor_smoothed);
+            kinematics_predictors = [kinematics_predictors, predictor_normalized];
+        end
     end
 
     %% 3. SPATIAL KERNELS
@@ -459,10 +499,10 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     % Combine spatial predictors
     spatial_predictors = [xy_spatial_predictors, z_spatial_predictors];
 
-    %% 4. BREATHING AMPLITUDE (8Hz and 1.5Hz) with ±1 sec kernel
+    %% 4. BREATHING AMPLITUDE (8Hz and 1.5Hz) with 8 separate ±1 sec kernels
 
-    breathing_8Hz = zeros(n_bins, 1);
-    breathing_1p5Hz = zeros(n_bins, 1);
+    breathing_8Hz_predictors = [];
+    breathing_1p5Hz_predictors = [];
 
     if ~isempty(Signal) && Fs > 0
         % Extract breathing from channel 32
@@ -478,14 +518,28 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         % Bin 8Hz
         amplitude_binned_8Hz = binContinuousSignal(amplitude_envelope_8Hz, NeuralTime, time_centers);
 
-        % Apply ±1 sec kernel (same as continuous predictors)
-        amplitude_padded_8Hz = [zeros(n_bins_continuous, 1); amplitude_binned_8Hz; zeros(n_bins_continuous - 1, 1)];
-        amplitude_convolved_8Hz = conv(amplitude_padded_8Hz, continuous_kernel, 'valid');
+        % Convolve with each of the 8 basis kernels
+        for k = 1:config.n_continuous_kernels
+            kernel = continuous_basis_kernels(:, k);
+            kernel_flipped = flipud(kernel);
 
-        % Smooth and normalize 8Hz
-        amplitude_smoothed_8Hz = smoothdata(amplitude_convolved_8Hz, 'gaussian', ...
-            round(config.smooth_window/config.bin_size));
-        breathing_8Hz = zscore(amplitude_smoothed_8Hz);
+            % Pad signal for convolution
+            n_bins_half = round(config.continuous_window / config.bin_size);
+            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_8Hz; zeros(n_bins_half, 1)];
+            predictor_full = conv(signal_padded, kernel_flipped, 'valid');
+
+            % Ensure correct length
+            if length(predictor_full) > n_bins
+                predictor_full = predictor_full(1:n_bins);
+            elseif length(predictor_full) < n_bins
+                predictor_full = [predictor_full; zeros(n_bins - length(predictor_full), 1)];
+            end
+
+            % Smooth and normalize
+            predictor_smoothed = smoothdata(predictor_full, 'gaussian', ...
+                round(config.smooth_window/config.bin_size));
+            breathing_8Hz_predictors = [breathing_8Hz_predictors, zscore(predictor_smoothed)];
+        end
 
         % Bandpass filter at 1.5Hz
         Signal_filtered_1p5Hz = bandpass(breathing_signal, config.breathing_band_1p5Hz, Fs, ...
@@ -497,22 +551,42 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         % Bin 1.5Hz
         amplitude_binned_1p5Hz = binContinuousSignal(amplitude_envelope_1p5Hz, NeuralTime, time_centers);
 
-        % Apply ±1 sec kernel (same as continuous predictors)
-        amplitude_padded_1p5Hz = [zeros(n_bins_continuous, 1); amplitude_binned_1p5Hz; zeros(n_bins_continuous - 1, 1)];
-        amplitude_convolved_1p5Hz = conv(amplitude_padded_1p5Hz, continuous_kernel, 'valid');
+        % Convolve with each of the 8 basis kernels
+        for k = 1:config.n_continuous_kernels
+            kernel = continuous_basis_kernels(:, k);
+            kernel_flipped = flipud(kernel);
 
-        % Smooth and normalize 1.5Hz
-        amplitude_smoothed_1p5Hz = smoothdata(amplitude_convolved_1p5Hz, 'gaussian', ...
-            round(config.smooth_window/config.bin_size));
-        breathing_1p5Hz = zscore(amplitude_smoothed_1p5Hz);
+            % Pad signal for convolution
+            n_bins_half = round(config.continuous_window / config.bin_size);
+            signal_padded = [zeros(n_bins_half, 1); amplitude_binned_1p5Hz; zeros(n_bins_half, 1)];
+            predictor_full = conv(signal_padded, kernel_flipped, 'valid');
+
+            % Ensure correct length
+            if length(predictor_full) > n_bins
+                predictor_full = predictor_full(1:n_bins);
+            elseif length(predictor_full) < n_bins
+                predictor_full = [predictor_full; zeros(n_bins - length(predictor_full), 1)];
+            end
+
+            % Smooth and normalize
+            predictor_smoothed = smoothdata(predictor_full, 'gaussian', ...
+                round(config.smooth_window/config.bin_size));
+            breathing_1p5Hz_predictors = [breathing_1p5Hz_predictors, zscore(predictor_smoothed)];
+        end
+    else
+        % If no breathing signal, create zero predictors
+        breathing_8Hz_predictors = zeros(n_bins, config.n_continuous_kernels);
+        breathing_1p5Hz_predictors = zeros(n_bins, config.n_continuous_kernels);
     end
 
     %% 5. ASSEMBLE NESTED MODELS
 
     % Separate coordinates and speeds from kinematics_predictors
-    % kinematics_predictors order: X_speed, Y_speed, Z_speed, X_coord, Y_coord, Z_coord
-    speed_predictors = kinematics_predictors(:, 1:3);  % X, Y, Z speeds
-    coord_predictors = kinematics_predictors(:, 4:6);  % X, Y, Z coordinates
+    % kinematics_predictors now has 6 signals × 8 kernels = 48 predictors
+    % Order: X_speed(8 kernels), Y_speed(8), Z_speed(8), X_coord(8), Y_coord(8), Z_coord(8)
+    n_kernels = config.n_continuous_kernels;
+    speed_predictors = kinematics_predictors(:, 1:(3*n_kernels));        % X, Y, Z speeds (24 predictors)
+    coord_predictors = kinematics_predictors(:, (3*n_kernels+1):end);    % X, Y, Z coordinates (24 predictors)
 
     % DM1: Events only
     DM1 = event_predictors;
@@ -523,8 +597,8 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     % DM3: Events + Coordinates + Spatial + Speeds
     DM3 = [event_predictors, coord_predictors, spatial_predictors, speed_predictors];
 
-    % DM4: Events + Coordinates + Spatial + Speeds + Breathing (8Hz + 1.5Hz)
-    DM4 = [event_predictors, coord_predictors, spatial_predictors, speed_predictors, breathing_8Hz(:), breathing_1p5Hz(:)];
+    % DM4: Events + Coordinates + Spatial + Speeds + Breathing (8Hz: 8 kernels, 1.5Hz: 8 kernels)
+    DM4 = [event_predictors, coord_predictors, spatial_predictors, speed_predictors, breathing_8Hz_predictors, breathing_1p5Hz_predictors];
 
     %% 6. PREDICTOR INFO
 
@@ -536,9 +610,11 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     % Note: Bias and spike history are added in fitNestedModels_robust
     predictor_names = {};
 
-    % Reward event predictors (Gaussian kernel, one predictor per event)
+    % Reward event predictors (24 Gaussian basis kernels per event)
     for ev = 1:length(reward_names)
-        predictor_names{end+1} = sprintf('%s_Gaussian', reward_names{ev});
+        for k = 1:config.n_reward_kernels
+            predictor_names{end+1} = sprintf('%s_kernel%d', reward_names{ev}, k);
+        end
     end
 
     % Aversive event predictors (raised cosine basis)
@@ -546,10 +622,13 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         predictor_names{end+1} = sprintf('Aversive_basis%d', b);
     end
 
-    % Coordinate predictors
-    predictor_names{end+1} = 'X_coord';
-    predictor_names{end+1} = 'Y_coord';
-    predictor_names{end+1} = 'Z_coord';
+    % Coordinate predictors (each has 8 kernels)
+    for i = 1:length({'X_coord', 'Y_coord', 'Z_coord'})
+        coord_name = {'X_coord', 'Y_coord', 'Z_coord'}{i};
+        for k = 1:n_kernels
+            predictor_names{end+1} = sprintf('%s_kernel%d', coord_name, k);
+        end
+    end
 
     % Spatial predictors
     for i = 1:n_spatial_bins_xy * n_spatial_bins_xy
@@ -559,21 +638,30 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
         predictor_names{end+1} = sprintf('Z_spatial_%d', i);
     end
 
-    % Speed predictors
-    predictor_names{end+1} = 'X_speed';
-    predictor_names{end+1} = 'Y_speed';
-    predictor_names{end+1} = 'Z_speed';
+    % Speed predictors (each has 8 kernels)
+    for i = 1:length({'X_speed', 'Y_speed', 'Z_speed'})
+        speed_name = {'X_speed', 'Y_speed', 'Z_speed'}{i};
+        for k = 1:n_kernels
+            predictor_names{end+1} = sprintf('%s_kernel%d', speed_name, k);
+        end
+    end
 
-    % Breathing
-    predictor_names{end+1} = 'Breathing_8Hz';
-    predictor_names{end+1} = 'Breathing_1.5Hz';
+    % Breathing (each has 8 kernels)
+    for k = 1:n_kernels
+        predictor_names{end+1} = sprintf('Breathing_8Hz_kernel%d', k);
+    end
+    for k = 1:n_kernels
+        predictor_names{end+1} = sprintf('Breathing_1.5Hz_kernel%d', k);
+    end
 
     predictor_info.predictor_names = predictor_names;
     predictor_info.reward_event_names = reward_names;
     predictor_info.continuous_names = continuous_names;
     predictor_info.n_spatial_bins_xy = n_spatial_bins_xy;
     predictor_info.n_spatial_bins_z = n_spatial_bins_z;
+    predictor_info.n_reward_kernels = config.n_reward_kernels;
     predictor_info.n_aversive_basis = n_basis;
+    predictor_info.n_continuous_kernels = n_kernels;
 end
 
 function basis = createRaisedCosineBasis(n_basis, n_bins, bin_size, stretch_param)
@@ -650,4 +738,40 @@ function binned_signal = binContinuousSignal(signal, time_stamps, bin_centers)
 %   binned_signal: [M × 1] binned signal
 
     binned_signal = interp1(time_stamps, signal, bin_centers, 'nearest', 'extrap');
+end
+
+function basis_kernels = createGaussianBasisKernels(window_size, bin_size, hwhh, n_kernels)
+% Create multiple Gaussian basis functions spanning ±window_size
+%
+% Inputs:
+%   window_size: Total window (e.g., 1.0 for ±1 sec)
+%   bin_size:    Bin size in seconds
+%   hwhh:        Half-width at half-height in seconds (e.g., 0.24 for 240ms)
+%   n_kernels:   Number of basis kernels (e.g., 8)
+%
+% Output:
+%   basis_kernels: [n_bins × n_kernels] matrix of Gaussian basis functions
+
+    % Convert HWHH to standard deviation
+    % For Gaussian: HWHH = sigma * sqrt(2*ln(2))
+    sigma = hwhh / sqrt(2 * log(2));
+
+    % Total bins for ±window_size
+    n_bins_half = round(window_size / bin_size);
+    total_bins = 2 * n_bins_half + 1;  % Include center bin
+    time_vec = ((-n_bins_half):n_bins_half)' * bin_size;
+
+    % Create evenly spaced kernel centers across the window
+    kernel_centers = linspace(-window_size, window_size, n_kernels);
+
+    % Initialize basis matrix
+    basis_kernels = zeros(total_bins, n_kernels);
+
+    % Create each Gaussian kernel
+    for k = 1:n_kernels
+        center = kernel_centers(k);
+        basis_kernels(:, k) = exp(-((time_vec - center).^2) / (2 * sigma^2));
+        % Normalize each kernel to sum to 1
+        basis_kernels(:, k) = basis_kernels(:, k) / sum(basis_kernels(:, k));
+    end
 end
