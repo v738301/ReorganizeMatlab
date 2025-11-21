@@ -3,7 +3,7 @@
 % Compares reward-seeking vs reward-aversive sessions across frequency bands
 
 clear all;
-% close all;
+close all;
 
 %% Load all session results
 DataSetsPath = '/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/SpikeAndLFP/DataSet';
@@ -125,6 +125,10 @@ data.p_values = [];     % [n_units x n_bands]
 data.is_significant = []; % [n_units x n_bands]
 data.preferred_phase = []; % [n_units x n_bands]
 data.n_spikes = [];     % [n_units x 1]
+% FIX: Add session and unit tracking for traceability
+data.session_id = [];   % [n_units x 1] - which session this unit came from
+data.unit_id = [];      % [n_units x 1] - unit index within session
+data.unique_unit_id = []; % [n_units x 1] - globally unique ID (session*1000 + unit)
 data.n_total_units = 0;
 
 for sess_idx = 1:length(session_results)
@@ -153,6 +157,10 @@ for sess_idx = 1:length(session_results)
         data.is_significant = [data.is_significant; unit_sig];
         data.preferred_phase = [data.preferred_phase; unit_phase];
         data.n_spikes = [data.n_spikes; unit.n_spikes];
+        % FIX: Track session and unit identity
+        data.session_id = [data.session_id; sess_idx];
+        data.unit_id = [data.unit_id; unit_idx];
+        data.unique_unit_id = [data.unique_unit_id; sess_idx * 1000 + unit_idx];
         data.n_total_units = data.n_total_units + 1;
     end
 end

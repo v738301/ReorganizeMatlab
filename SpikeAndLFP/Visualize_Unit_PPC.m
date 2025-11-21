@@ -49,6 +49,8 @@ for i = 1:n_aversive
         session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
         session_results.data.SessionID = repmat(i, height(session_results.data), 1);
         session_results.data.SessionName = repmat({aversive_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (ensures uniqueness across sessions)
+        session_results.data.UniqueUnitID = i * 1000 + double(session_results.data.Unit);
         all_data_aversive = [all_data_aversive; session_results.data];
     end
 end
@@ -57,8 +59,10 @@ for i = 1:n_reward
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
-        session_results.data.SessionID = repmat(i, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i + 10000, height(session_results.data), 1);
         session_results.data.SessionName = repmat({reward_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (10000 offset for reward sessions)
+        session_results.data.UniqueUnitID = (i + 10000) * 1000 + double(session_results.data.Unit);
         all_data_reward = [all_data_reward; session_results.data];
     end
 end
@@ -281,7 +285,7 @@ subplot(1, 2, 1);
 aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, periods_to_include), :);
 if ~isempty(aversive_selected)
     heatmap_data_av = createUnitFrequencyHeatmap(aversive_selected, unique_freqs);
-    imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av);
+    imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av, [-0.02,0.02]);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
@@ -300,7 +304,7 @@ subplot(1, 2, 2);
 reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, periods_to_include), :);
 if ~isempty(reward_selected)
     heatmap_data_rw = createUnitFrequencyHeatmap(reward_selected, unique_freqs);
-    imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
+    imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw, [-0.02,0.02]);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
@@ -671,14 +675,16 @@ function heatmap_data = createUnitFrequencyHeatmap(data, unique_freqs)
 % OUTPUTS:
 %   heatmap_data - Matrix (n_units × n_freqs) of PPC values
 
-    unique_units = unique(data.Unit);
+    % FIX: Use UniqueUnitID to prevent collision across sessions
+    unique_units = unique(data.UniqueUnitID);
     n_units = length(unique_units);
     n_freqs = length(unique_freqs);
 
     heatmap_data = nan(n_units, n_freqs);
 
     for u = 1:n_units
-        unit_data = data(data.Unit == unique_units(u), :);
+        % FIX: Filter by UniqueUnitID instead of Unit
+        unit_data = data(data.UniqueUnitID == unique_units(u), :);
 
         for f = 1:n_freqs
             freq = unique_freqs(f);

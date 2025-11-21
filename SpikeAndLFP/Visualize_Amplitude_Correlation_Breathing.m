@@ -47,6 +47,10 @@ for i = 1:length(aversive_files)
     load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({aversive_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (ensures uniqueness across sessions)
+        session_results.data.UniqueUnitID = i * 1000 + double(session_results.data.Unit);
         all_data_aversive = [all_data_aversive; session_results.data];
     end
 end
@@ -55,6 +59,10 @@ for i = 1:length(reward_files)
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i + 10000, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({reward_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (10000 offset for reward sessions)
+        session_results.data.UniqueUnitID = (i + 10000) * 1000 + double(session_results.data.Unit);
         all_data_reward = [all_data_reward; session_results.data];
     end
 end

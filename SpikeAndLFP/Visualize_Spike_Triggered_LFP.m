@@ -128,13 +128,16 @@ if isempty(all_units)
     error('No data found in any session files');
 end
 
+% Create unique unit ID: SessionID * 1000 + Unit (prevents collision across sessions)
+all_unique_unit_ids = all_session_ids * 1000 + double(all_units);
+
 % Create single table with guaranteed correct dimensions
 tbl = table(all_units, all_periods, all_sta_waveforms, all_sta_peaks, ...
             all_sta_consistency, all_n_spikes, all_session_types, ...
-            all_session_ids, all_session_names, ...
+            all_session_ids, all_session_names, all_unique_unit_ids, ...
             'VariableNames', {'Unit', 'Period', 'STA_Waveform', 'STA_Peak', ...
                               'STA_Consistency', 'N_spikes', 'SessionType', ...
-                              'SessionID', 'SessionName'});
+                              'SessionID', 'SessionName', 'UniqueUnitID'});
 tbl.SessionType = categorical(tbl.SessionType);
 
 fprintf('✓ Data loaded: %d total entries\n\n', height(tbl));
@@ -251,99 +254,6 @@ saveas(fig3, fullfile(output_dir, 'Figure3_STA_Consistency.png'));
 fprintf('  ✓ Saved\n');
 
 %% ========================================================================
-%  FIGURE 4: SINGLE SESSION EXAMPLES
-%  ========================================================================
-
-fprintf('Creating Figure 4: Single Session Examples...\n');
-
-% Select example sessions (first aversive and first reward with sufficient units)
-unique_sessions = unique(tbl.SessionID);
-aversive_sessions = unique(tbl.SessionID(tbl.SessionType == 'Aversive'));
-reward_sessions = unique(tbl.SessionID(tbl.SessionType == 'Reward'));
-
-% Plot first 2 aversive and 2 reward sessions with >= 5 units in period 1
-n_examples = 2;
-session_dir = fullfile(output_dir, 'SingleSessions');
-if ~exist(session_dir, 'dir'), mkdir(session_dir); end
-
-% Aversive examples
-aversive_plotted = 0;
-for sess_id = aversive_sessions'
-    sess_data_p1 = tbl(tbl.SessionID == sess_id & tbl.Period == 1, :);
-    n_units_sess = length(unique(sess_data_p1.Unit));
-
-    if n_units_sess >= 5 && aversive_plotted < n_examples
-        aversive_plotted = aversive_plotted + 1;
-        plot_single_session(tbl, sess_id, time_vec, session_dir, color_aversive, 7);
-    end
-    if aversive_plotted >= n_examples, break; end
-end
-
-% Reward examples
-reward_plotted = 0;
-for sess_id = reward_sessions'
-    sess_data_p1 = tbl(tbl.SessionID == sess_id & tbl.Period == 1, :);
-    n_units_sess = length(unique(sess_data_p1.Unit));
-
-    if n_units_sess >= 5 && reward_plotted < n_examples
-        reward_plotted = reward_plotted + 1;
-        plot_single_session(tbl, sess_id, time_vec, session_dir, color_reward, 4);
-    end
-    if reward_plotted >= n_examples, break; end
-end
-
-fprintf('  ✓ Saved %d session examples\n', aversive_plotted + reward_plotted);
-
-%% ========================================================================
-%  FIGURE 5: SINGLE UNIT EXAMPLES
-%  ========================================================================
-
-fprintf('Creating Figure 5: Single Unit Examples...\n');
-
-% Create unit examples directory
-unit_dir = fullfile(output_dir, 'SingleUnits');
-if ~exist(unit_dir, 'dir'), mkdir(unit_dir); end
-
-% Select example units with high and low consistency
-n_unit_examples = 3;
-
-% High consistency aversive units (phase-locked)
-aversive_data_p1 = tbl(tbl.SessionType == 'Aversive' & tbl.Period == 1, :);
-[~, sort_idx] = sort(aversive_data_p1.STA_Consistency, 'ascend');
-high_consistency_aversive = sort_idx(1:min(n_unit_examples, length(sort_idx)));
-
-for i = 1:length(high_consistency_aversive)
-    row_idx = high_consistency_aversive(i);
-    sess_id = aversive_data_p1.SessionID(row_idx);
-    unit_id = aversive_data_p1.Unit(row_idx);
-    plot_single_unit(tbl, sess_id, unit_id, time_vec, unit_dir, color_aversive, 7, 'HighConsistency');
-end
-
-% Low consistency aversive units (amplitude-modulated)
-low_consistency_aversive = sort_idx(end-n_unit_examples+1:end);
-
-for i = 1:length(low_consistency_aversive)
-    row_idx = low_consistency_aversive(i);
-    sess_id = aversive_data_p1.SessionID(row_idx);
-    unit_id = aversive_data_p1.Unit(row_idx);
-    plot_single_unit(tbl, sess_id, unit_id, time_vec, unit_dir, color_aversive, 7, 'LowConsistency');
-end
-
-% Reward examples
-reward_data_p1 = tbl(tbl.SessionType == 'Reward' & tbl.Period == 1, :);
-[~, sort_idx] = sort(reward_data_p1.STA_Consistency, 'ascend');
-high_consistency_reward = sort_idx(1:min(n_unit_examples, length(sort_idx)));
-
-for i = 1:length(high_consistency_reward)
-    row_idx = high_consistency_reward(i);
-    sess_id = reward_data_p1.SessionID(row_idx);
-    unit_id = reward_data_p1.Unit(row_idx);
-    plot_single_unit(tbl, sess_id, unit_id, time_vec, unit_dir, color_reward, 4, 'HighConsistency');
-end
-
-fprintf('  ✓ Saved %d unit examples\n', length(high_consistency_aversive) + length(low_consistency_aversive) + length(high_consistency_reward));
-
-%% ========================================================================
 %  FIGURE 6: UNIT × TIME HEATMAP (All STA Waveforms)
 %  ========================================================================
 
@@ -364,7 +274,7 @@ subplot(1, 2, 1);
 aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, periods_to_include), :);
 if ~isempty(aversive_selected)
     heatmap_data_av = createSTAHeatmap(aversive_selected);
-    imagesc(time_vec, 1:size(heatmap_data_av, 1), heatmap_data_av);
+    imagesc(time_vec, 1:size(heatmap_data_av, 1), heatmap_data_av, [-100,100]);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
@@ -385,7 +295,7 @@ subplot(1, 2, 2);
 reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, periods_to_include), :);
 if ~isempty(reward_selected)
     heatmap_data_rw = createSTAHeatmap(reward_selected);
-    imagesc(time_vec, 1:size(heatmap_data_rw, 1), heatmap_data_rw);
+    imagesc(time_vec, 1:size(heatmap_data_rw, 1), heatmap_data_rw, [-100,100]);
     set(gca, 'YDir', 'normal');
     colorbar;
     colormap(jet);
@@ -594,8 +504,8 @@ function heatmap_data = createSTAHeatmap(data)
 % OUTPUTS:
 %   heatmap_data - Matrix (n_units × n_timepoints)
 
-    % Get unique units
-    unique_units = unique(data.Unit);
+    % FIX: Use UniqueUnitID to prevent collision across sessions
+    unique_units = unique(data.UniqueUnitID);
     n_units = length(unique_units);
 
     % Get first waveform to determine size
@@ -604,10 +514,17 @@ function heatmap_data = createSTAHeatmap(data)
     heatmap_data = nan(n_units, n_timepoints);
 
     for u = 1:n_units
-        unit_data = data(data.Unit == unique_units(u), :);
+        % FIX: Filter by UniqueUnitID instead of Unit
+        unit_data = data(data.UniqueUnitID == unique_units(u), :);
 
         if ~isempty(unit_data) && ~isempty(unit_data.STA_Waveform{1})
-            heatmap_data(u, :) = unit_data.STA_Waveform{1};
+            % Average across periods if multiple entries for this unique unit
+            if height(unit_data) > 1
+                all_waveforms = cell2mat(unit_data.STA_Waveform);
+                heatmap_data(u, :) = mean(all_waveforms, 1);
+            else
+                heatmap_data(u, :) = unit_data.STA_Waveform{1};
+            end
         end
     end
 end

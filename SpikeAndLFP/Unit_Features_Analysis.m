@@ -89,13 +89,14 @@ aversive_data.CV = [];
 aversive_data.ISI_FanoFactor = [];
 aversive_data.ISI_ACF_peak = [];
 aversive_data.ISI_ACF_lag = [];
-aversive_data.ISI_ACF_decay = [];
 aversive_data.Count_ACF_1ms_peak = [];
 aversive_data.Count_ACF_25ms_peak = [];
 aversive_data.Count_ACF_50ms_peak = [];
+aversive_data.Count_ACF_1ms_peak_ind = [];
+aversive_data.Count_ACF_25ms_peak_ind = [];
+aversive_data.Count_ACF_50ms_peak_ind = [];
 aversive_data.LV = [];
 aversive_data.CV2 = [];
-aversive_data.LVR = [];
 aversive_data.BurstIndex = [];
 aversive_data.BurstRate = [];
 aversive_data.MeanBurstLength = [];
@@ -173,13 +174,14 @@ for sess_idx = 1:num_aversive_sessions
             aversive_data.ISI_FanoFactor(end+1) = metrics.ISI_FanoFactor;
             aversive_data.ISI_ACF_peak(end+1) = metrics.ISI_ACF_peak;
             aversive_data.ISI_ACF_lag(end+1) = metrics.ISI_ACF_lag;
-            aversive_data.ISI_ACF_decay(end+1) = metrics.ISI_ACF_decay;
             aversive_data.Count_ACF_1ms_peak(end+1) = metrics.Count_ACF_1ms_peak;
             aversive_data.Count_ACF_25ms_peak(end+1) = metrics.Count_ACF_25ms_peak;
             aversive_data.Count_ACF_50ms_peak(end+1) = metrics.Count_ACF_50ms_peak;
+            aversive_data.Count_ACF_1ms_peak_ind(end+1) = metrics.Count_ACF_1ms_peak_ind;
+            aversive_data.Count_ACF_25ms_peak_ind(end+1) = metrics.Count_ACF_25ms_peak_ind;
+            aversive_data.Count_ACF_50ms_peak_ind(end+1) = metrics.Count_ACF_50ms_peak_ind;
             aversive_data.LV(end+1) = metrics.LV;
             aversive_data.CV2(end+1) = metrics.CV2;
-            aversive_data.LVR(end+1) = metrics.LVR;
             aversive_data.BurstIndex(end+1) = metrics.BurstIndex;
             aversive_data.BurstRate(end+1) = metrics.BurstRate;
             aversive_data.MeanBurstLength(end+1) = metrics.MeanBurstLength;
@@ -221,13 +223,14 @@ reward_data.CV = [];
 reward_data.ISI_FanoFactor = [];
 reward_data.ISI_ACF_peak = [];
 reward_data.ISI_ACF_lag = [];
-reward_data.ISI_ACF_decay = [];
 reward_data.Count_ACF_1ms_peak = [];
 reward_data.Count_ACF_25ms_peak = [];
 reward_data.Count_ACF_50ms_peak = [];
+reward_data.Count_ACF_1ms_peak_ind = [];
+reward_data.Count_ACF_25ms_peak_ind = [];
+reward_data.Count_ACF_50ms_peak_ind = [];
 reward_data.LV = [];
 reward_data.CV2 = [];
-reward_data.LVR = [];
 reward_data.BurstIndex = [];
 reward_data.BurstRate = [];
 reward_data.MeanBurstLength = [];
@@ -301,13 +304,14 @@ for sess_idx = 1:num_reward_sessions
             reward_data.ISI_FanoFactor(end+1) = metrics.ISI_FanoFactor;
             reward_data.ISI_ACF_peak(end+1) = metrics.ISI_ACF_peak;
             reward_data.ISI_ACF_lag(end+1) = metrics.ISI_ACF_lag;
-            reward_data.ISI_ACF_decay(end+1) = metrics.ISI_ACF_decay;
             reward_data.Count_ACF_1ms_peak(end+1) = metrics.Count_ACF_1ms_peak;
             reward_data.Count_ACF_25ms_peak(end+1) = metrics.Count_ACF_25ms_peak;
             reward_data.Count_ACF_50ms_peak(end+1) = metrics.Count_ACF_50ms_peak;
+            reward_data.Count_ACF_1ms_peak_ind(end+1) = metrics.Count_ACF_1ms_peak_ind;
+            reward_data.Count_ACF_25ms_peak_ind(end+1) = metrics.Count_ACF_25ms_peak_ind;
+            reward_data.Count_ACF_50ms_peak_ind(end+1) = metrics.Count_ACF_50ms_peak_ind;
             reward_data.LV(end+1) = metrics.LV;
             reward_data.CV2(end+1) = metrics.CV2;
-            reward_data.LVR(end+1) = metrics.LVR;
             reward_data.BurstIndex(end+1) = metrics.BurstIndex;
             reward_data.BurstRate(end+1) = metrics.BurstRate;
             reward_data.MeanBurstLength(end+1) = metrics.MeanBurstLength;
@@ -344,7 +348,8 @@ combined_data = struct();
 combined_data.session_id = [aversive_data.session_id(:); reward_data.session_id(:)];
 combined_data.unit_id = [aversive_data.unit_id(:); reward_data.unit_id(:)];
 combined_data.period = [aversive_data.period(:); reward_data.period(:)];
-combined_data.session_type = [aversive_data.session_type; reward_data.session_type];
+combined_data.session_type = [aversive_data.session_type(:); reward_data.session_type(:)];
+combined_data.session_name = [aversive_data.session_name(:); reward_data.session_name(:)];
 combined_data.period_duration = [aversive_data.period_duration(:); reward_data.period_duration(:)];
 
 % Combine all 22 metrics
@@ -353,13 +358,14 @@ combined_data.CV = [aversive_data.CV(:); reward_data.CV(:)];
 combined_data.ISI_FanoFactor = [aversive_data.ISI_FanoFactor(:); reward_data.ISI_FanoFactor(:)];
 combined_data.ISI_ACF_peak = [aversive_data.ISI_ACF_peak(:); reward_data.ISI_ACF_peak(:)];
 combined_data.ISI_ACF_lag = [aversive_data.ISI_ACF_lag(:); reward_data.ISI_ACF_lag(:)];
-combined_data.ISI_ACF_decay = [aversive_data.ISI_ACF_decay(:); reward_data.ISI_ACF_decay(:)];
 combined_data.Count_ACF_1ms_peak = [aversive_data.Count_ACF_1ms_peak(:); reward_data.Count_ACF_1ms_peak(:)];
 combined_data.Count_ACF_25ms_peak = [aversive_data.Count_ACF_25ms_peak(:); reward_data.Count_ACF_25ms_peak(:)];
 combined_data.Count_ACF_50ms_peak = [aversive_data.Count_ACF_50ms_peak(:); reward_data.Count_ACF_50ms_peak(:)];
+combined_data.Count_ACF_1ms_peak_ind = [aversive_data.Count_ACF_1ms_peak_ind(:); reward_data.Count_ACF_1ms_peak_ind(:)];
+combined_data.Count_ACF_25ms_peak_ind = [aversive_data.Count_ACF_25ms_peak_ind(:); reward_data.Count_ACF_25ms_peak_ind(:)];
+combined_data.Count_ACF_50ms_peak_ind = [aversive_data.Count_ACF_50ms_peak_ind(:); reward_data.Count_ACF_50ms_peak_ind(:)];
 combined_data.LV = [aversive_data.LV(:); reward_data.LV(:)];
 combined_data.CV2 = [aversive_data.CV2(:); reward_data.CV2(:)];
-combined_data.LVR = [aversive_data.LVR(:); reward_data.LVR(:)];
 combined_data.BurstIndex = [aversive_data.BurstIndex(:); reward_data.BurstIndex(:)];
 combined_data.BurstRate = [aversive_data.BurstRate(:); reward_data.BurstRate(:)];
 combined_data.MeanBurstLength = [aversive_data.MeanBurstLength(:); reward_data.MeanBurstLength(:)];
@@ -456,13 +462,14 @@ function metrics = calculateAllMetrics(spike_times, period_start, period_end, co
     metrics.ISI_FanoFactor = NaN;
     metrics.ISI_ACF_peak = NaN;
     metrics.ISI_ACF_lag = NaN;
-    metrics.ISI_ACF_decay = NaN;
     metrics.Count_ACF_1ms_peak = NaN;
     metrics.Count_ACF_25ms_peak = NaN;
     metrics.Count_ACF_50ms_peak = NaN;
+    metrics.Count_ACF_1ms_peak_ind = NaN;
+    metrics.Count_ACF_25ms_peak_ind = NaN;
+    metrics.Count_ACF_50ms_peak_ind = NaN;
     metrics.LV = NaN;
     metrics.CV2 = NaN;
-    metrics.LVR = NaN;
     metrics.BurstIndex = NaN;
     metrics.BurstRate = NaN;
     metrics.MeanBurstLength = NaN;
@@ -498,11 +505,10 @@ function metrics = calculateAllMetrics(spike_times, period_start, period_end, co
         metrics.ISI_FanoFactor = var(ISI) / isi_mean;
 
         % 3. ISI Auto-correlation
-        [acf_vals, acf_lags] = calculateISI_ACF(ISI, config.acf_max_lag);
+        [acf_vals, acf_lags] = calculateISI_ACF(ISI);
         if ~isempty(acf_vals) && length(acf_vals) > 1
             [metrics.ISI_ACF_peak, peak_idx] = max(acf_vals(2:end));  % Skip lag 0
             metrics.ISI_ACF_lag = acf_lags(peak_idx + 1);
-            metrics.ISI_ACF_decay = calculateACFDecay(acf_vals, acf_lags);
         end
 
         % 4. Local Variation (LV)
@@ -510,9 +516,6 @@ function metrics = calculateAllMetrics(spike_times, period_start, period_end, co
 
         % 5. CV2
         metrics.CV2 = calculateCV2(ISI);
-
-        % 6. LVR (Revised Local Variation)
-        metrics.LVR = calculateLVR(ISI, config.refrac_threshold);
 
         % 7-9. Burst metrics
         [metrics.BurstIndex, metrics.BurstRate, metrics.MeanBurstLength] = ...
@@ -534,23 +537,26 @@ function metrics = calculateAllMetrics(spike_times, period_start, period_end, co
     for bin_idx = 1:length(config.count_bin_sizes)
         bin_size = config.count_bin_sizes(bin_idx);
 
-        [fano, acf_peak] = calculateCountMetrics(spike_times, period_start, period_end, ...
+        [fano, acf_peak, acf_peak_ind] = calculateCountMetrics(spike_times, period_start, period_end, ...
                                                   bin_size, config.acf_max_lag);
 
         if bin_size == 0.001
             metrics.CountFanoFactor_1ms = fano;
             metrics.Count_ACF_1ms_peak = acf_peak;
+            metrics.Count_ACF_1ms_peak_ind = acf_peak_ind;
         elseif bin_size == 0.025
             metrics.CountFanoFactor_25ms = fano;
             metrics.Count_ACF_25ms_peak = acf_peak;
+            metrics.Count_ACF_25ms_peak_ind = acf_peak_ind;
         elseif bin_size == 0.050
             metrics.CountFanoFactor_50ms = fano;
             metrics.Count_ACF_50ms_peak = acf_peak;
+            metrics.Count_ACF_50ms_peak_ind = acf_peak_ind;
         end
     end
 end
 
-function [acf_vals, acf_lags] = calculateISI_ACF(ISI, max_lag)
+function [acf_vals, acf_lags] = calculateISI_ACF(ISI)
 % Calculate auto-correlation of ISI up to max_lag
 
     if length(ISI) < 3
@@ -559,47 +565,15 @@ function [acf_vals, acf_lags] = calculateISI_ACF(ISI, max_lag)
         return;
     end
 
-    % Determine number of lags
-    mean_isi = mean(ISI);
-    if mean_isi == 0
-        acf_vals = [];
-        acf_lags = [];
-        return;
-    end
-
-    max_lag_samples = min(floor(max_lag / mean_isi), length(ISI) - 1);
-    max_lag_samples = max(max_lag_samples, 1);
-
     % Calculate ACF
     try
-        [acf_vals, ~, ~] = autocorr(ISI, max_lag_samples);
-        acf_lags = (0:max_lag_samples) * mean_isi;
+        [acf_vals, acf_lags] = autocorr(ISI);
     catch
         acf_vals = [];
         acf_lags = [];
     end
 end
 
-function decay_time = calculateACFDecay(acf_vals, acf_lags)
-% Find time to reach 50% of peak ACF value
-
-    if length(acf_vals) < 2
-        decay_time = NaN;
-        return;
-    end
-
-    peak_val = max(acf_vals(2:end));  % Exclude lag 0
-    threshold = peak_val * 0.5;
-
-    % Find first crossing
-    crossing_idx = find(acf_vals(2:end) < threshold, 1, 'first');
-
-    if isempty(crossing_idx)
-        decay_time = acf_lags(end);
-    else
-        decay_time = acf_lags(crossing_idx + 1);
-    end
-end
 
 function LV = calculateLV(ISI)
 % Local Variation: sensitive to rate changes
@@ -633,33 +607,6 @@ function CV2 = calculateCV2(ISI)
     end
 
     CV2 = 2 * sum_term / (n - 1);
-end
-
-function LVR = calculateLVR(ISI, refrac_period)
-% Revised Local Variation: corrected for refractoriness
-
-    n = length(ISI);
-    if n < 2
-        LVR = NaN;
-        return;
-    end
-
-    sum_term = 0;
-    valid_count = 0;
-
-    for i = 1:(n-1)
-        % Only include pairs where both ISIs > refractory period
-        if ISI(i) > refrac_period && ISI(i+1) > refrac_period
-            sum_term = sum_term + ((ISI(i+1) - ISI(i))^2) / ((ISI(i+1) + ISI(i))^2);
-            valid_count = valid_count + 1;
-        end
-    end
-
-    if valid_count > 0
-        LVR = (3 / valid_count) * sum_term;
-    else
-        LVR = NaN;
-    end
 end
 
 function [burst_index, burst_rate, mean_burst_length] = calculateBurstMetrics(ISI, threshold, duration)
@@ -697,7 +644,7 @@ function [burst_index, burst_rate, mean_burst_length] = calculateBurstMetrics(IS
     end
 end
 
-function [fano_factor, acf_peak] = calculateCountMetrics(spike_times, period_start, period_end, bin_size, max_lag)
+function [fano_factor, acf_peak, acf_peak_ind] = calculateCountMetrics(spike_times, period_start, period_end, bin_size, max_lag)
 % Calculate spike count Fano factor and ACF for given bin size
 
     % Create bins
@@ -725,9 +672,10 @@ function [fano_factor, acf_peak] = calculateCountMetrics(spike_times, period_sta
         max_lag_bins = max(max_lag_bins, 1);
 
         try
-            acf_vals = autocorr(spike_counts, max_lag_bins);
+            acf_vals = autocorr(spike_counts, NumLags=max_lag_bins);
             if length(acf_vals) > 1
-                acf_peak = max(acf_vals(2:end));  % EXCLUDE LAG 0
+                [acf_peak,acf_peak_ind] = max(acf_vals(2:end));  % EXCLUDE LAG 0
+                acf_peak_ind = acf_peak_ind+1;
             else
                 acf_peak = NaN;
             end

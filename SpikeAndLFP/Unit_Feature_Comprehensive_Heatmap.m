@@ -1,22 +1,20 @@
 %% ========================================================================
-%  COMPREHENSIVE UNIT FEATURE HEATMAP
-%  Creates a single large heatmap showing all features for all units
-%  with multiple sorting and clustering options
+%  COMPREHENSIVE UNIT CLUSTERING AND VISUALIZATION
+%  Hierarchical clustering and heatmap visualization of all unit features
 %% ========================================================================
 %
-%  This script creates a comprehensive visualization of all unit features:
-%  - Coherence features (narrow + broad bands)
-%  - Phase coupling features (MRL for all band × behavior combinations)
-%  - PSTH response features (key events)
+%  This script creates comprehensive visualizations of unit features for clustering:
+%  - All 23 spike train metrics
+%  - PPC, Coherence, Amplitude Correlation (LFP + Breathing) at 2 freq bands
+%  - PSTH responses to various events
 %
-%  Sorting options:
-%  1. By session type (Aversive vs Reward)
-%  2. Hierarchical clustering (unsupervised)
-%  3. By specific feature values
-%  4. By principal components
+%  Clustering options:
+%  1. Hierarchical clustering (Ward's method)
+%  2. Separate analysis for Aversive vs Reward sessions
+%  3. Simplified clustering with key features only
 %
-%  Input: unit_features_comprehensive.mat
-%  Output: Comprehensive heatmap figure
+%  Input: unit_features_for_clustering.mat (from Unit_Feature_Extraction.m)
+%  Output: Comprehensive heatmap figures with dendrograms
 %
 %% ========================================================================
 
@@ -27,32 +25,54 @@ close all;
 %  SECTION 1: CONFIGURATION
 %% ========================================================================
 
-fprintf('=== COMPREHENSIVE UNIT FEATURE HEATMAP ===\n\n');
+fprintf('=== COMPREHENSIVE UNIT CLUSTERING AND VISUALIZATION ===\n\n');
+
+% ========== MAIN CONFIGURATION ==========
+config = struct();
+
+% Clustering configuration
+config.separate_by_session = true;   % Analyze Aversive/Reward separately
+config.normalize_features = true;    % Z-score normalize each feature
+
+% Session-specific cluster thresholds (distance threshold for cluster assignment)
+config.cluster_threshold_aversive = 55;  % Aversive sessions (lower = more clusters)
+config.cluster_threshold_reward = 55;     % Reward sessions (lower = more clusters)
 
 % Visualization configuration
-config = struct();
-config.cluster_dimension = 'units';  % Options: 'units', 'features', 'both'
-config.sort_method = 'hierarchical';  % Options: 'session_type', 'hierarchical', 'pca', 'feature'
-config.feature_to_sort = [];  % Used if sort_method = 'feature'
-config.show_dendrogram = true;  % Show hierarchical clustering dendrogram
-config.normalize_features = true;  % Z-score normalize each feature column
-config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula', 'redblue'
-config.exclude_categories = {'Phase_Narrow','Phase_Broad'};  % Feature categories to exclude, e.g., {'PSTH', 'Coherence'}
-config.separate_by_session = true;  % Analyze reward and aversive sessions separately
-config.simplified_cluster_threshold = 9;  % Distance threshold for simplified clustering (lower = more clusters)
-config.exclude_sessions = [3,4,17,18,35,36];  % Session IDs to exclude from analysis, e.g., {'SessionA001', 'SessionR005'}
+config.colormap_name = 'bluewhitered';  % 'bluewhitered', 'jet', 'parula'
+config.show_dendrogram = true;       % Show hierarchical clustering dendrogram
+
+% Feature selection configuration
+% config.exclude_categories = {'Spike_Basic','Spike_Temporal','PPC','MutualInfo','Coherence'};      % e.g., {'PSTH'} to exclude PSTH features
+config.exclude_categories = [];
+
+% ========== SIMPLIFIED CLUSTERING CONFIGURATION ==========
+% Controls which features are used for simplified clustering (Section 8)
+config.use_data_driven_features = true;  % true = use top features from importance analysis
+                                          % false = use manually specified features
+config.feature_selection_method = 'RFE'; % Feature selection method:
+                                          % 'Univariate' - ANOVA + effect size (fast)
+                                          % 'RandomForest' - RF importance (captures interactions)
+                                          % 'RFE' - Recursive elimination with validation (most robust)
+config.n_top_features = 10;               % Number of top features to use (Univariate/RF only)
+                                          % Options: 5, 10, 15, or any number
+                                          % RFE determines optimal number automatically
+config.rfe_min_features = 10;              % Minimum features for RFE
+config.rfe_quality_threshold = 0.05;      % Max quality drop for RFE (0.05 = 5% degradation allowed)
 
 fprintf('Configuration:\n');
-fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
-fprintf('  Sort method: %s\n', config.sort_method);
-fprintf('  Separate by session: %d\n', config.separate_by_session);
-fprintf('  Normalize features: %d\n', config.normalize_features);
+fprintf('  Separate by session: %s\n', mat2str(config.separate_by_session));
+fprintf('  Normalize features: %s\n', mat2str(config.normalize_features));
+fprintf('  Cluster threshold - Aversive: %.1f, Reward: %.1f\n', ...
+    config.cluster_threshold_aversive, config.cluster_threshold_reward);
 fprintf('  Colormap: %s\n', config.colormap_name);
 if ~isempty(config.exclude_categories)
     fprintf('  Exclude categories: %s\n', strjoin(config.exclude_categories, ', '));
 end
-if ~isempty(config.exclude_sessions)
-    fprintf('  Exclude sessions: %d\n', config.exclude_sessions);
+if config.use_data_driven_features
+    fprintf('  Simplified clustering: Data-driven (top %d features)\n', config.n_top_features);
+else
+    fprintf('  Simplified clustering: Manual selection\n');
 end
 fprintf('\n');
 
@@ -63,259 +83,44 @@ fprintf('\n');
 fprintf('Loading feature data...\n');
 
 try
-    load('unit_features_comprehensive.mat', 'unit_features_comprehensive');
-    fprintf('✓ Loaded feature data\n\n');
+    loaded = load('unit_features_for_clustering.mat');
+    results = loaded.results;
+    master_features = results.master_features;
+    feature_names = results.feature_names;
+    fprintf('✓ Loaded: %d units × %d features\n\n', results.n_units, results.n_features);
 catch ME
     fprintf('❌ Failed to load: %s\n', ME.message);
     fprintf('Please run Unit_Feature_Extraction.m first\n');
     return;
 end
 
-% Extract components
-coherence_features = unit_features_comprehensive.coherence_features;
-phase_narrow_features = unit_features_comprehensive.phase_narrow_features;
-phase_broad_features = unit_features_comprehensive.phase_broad_features;
-psth_features = unit_features_comprehensive.psth_features;
-feat_config = unit_features_comprehensive.config;
-
-n_units_coherence = length(coherence_features);
-n_units_phase_narrow = length(phase_narrow_features);
-n_units_phase_broad = length(phase_broad_features);
-n_units_psth = length(psth_features);
-
-fprintf('Available units:\n');
-fprintf('  Coherence: %d units\n', n_units_coherence);
-fprintf('  Phase narrow: %d units\n', n_units_phase_narrow);
-fprintf('  Phase broad: %d units\n', n_units_phase_broad);
-fprintf('  PSTH: %d units\n\n', n_units_psth);
-
-% Use coherence features as the base (most complete)
-n_units = n_units_coherence;
-
 %% ========================================================================
-%  SECTION 2.5: FILTER SESSIONS (OPTIONAL)
+%  SECTION 3: PREPARE FEATURE MATRIX
 %% ========================================================================
 
-if ~isempty(config.exclude_sessions)
-    fprintf('Filtering sessions...\n');
+fprintf('Preparing feature matrix...\n');
 
-    % Extract session IDs from unit metadata
-    if isfield(coherence_features, 'session_id')
-        unit_session_ids = {coherence_features.session_id};
-    elseif isfield(coherence_features, 'unit_id')
-        % Extract session ID from unit_id (format might be 'SessionID_UnitID')
-        unit_ids = {coherence_features.unit_id};
-        unit_session_ids = cellfun(@(x) extractBefore(x, '_'), unit_ids, 'UniformOutput', false);
-        % If no underscore, use the whole unit_id
-        for i = 1:length(unit_session_ids)
-            if isempty(unit_session_ids{i})
-                unit_session_ids{i} = unit_ids{i};
-            end
-        end
-    else
-        warning('No session_id or unit_id field found, cannot filter sessions');
-        unit_session_ids = cell(1, n_units);
-    end
+% Extract metadata columns
+n_units = height(master_features);
+session_ids = master_features.Session;
+unit_ids = master_features.Unit;
+session_types = master_features.SessionType;
+is_aversive = contains(string(session_types), 'Aversive');
 
-    % Find units to keep (not in excluded sessions)
-    units_to_keep = true(1, n_units);
-    for i = 1:n_units
-        if any(ismember(unit_session_ids{i}, config.exclude_sessions))
-            units_to_keep(i) = false;
-        end
-    end
+% Extract feature columns (skip metadata: GlobalUnitID, Session, Unit, SessionType)
+feature_col_start = 5;  % Features start at column 5
+feature_matrix = table2array(master_features(:, feature_col_start:end));
 
-    n_excluded = sum(~units_to_keep);
-    fprintf('  Excluding %d units from %d session(s)\n', n_excluded, length(config.exclude_sessions));
+% Categorize features for color coding
+feature_categories = categorize_features(feature_names);
+unique_categories = unique(feature_categories, 'stable');
 
-    % Filter all feature structures
-    coherence_features = coherence_features(units_to_keep);
-
-    % Filter phase features if they have the same length
-    if n_units_phase_narrow == n_units
-        phase_narrow_features = phase_narrow_features(units_to_keep);
-    end
-    if n_units_phase_broad == n_units
-        phase_broad_features = phase_broad_features(units_to_keep);
-    end
-    if n_units_psth == n_units
-        psth_features = psth_features(units_to_keep);
-    end
-
-    % Update counts
-    n_units_coherence = length(coherence_features);
-    n_units_phase_narrow = length(phase_narrow_features);
-    n_units_phase_broad = length(phase_broad_features);
-    n_units_psth = length(psth_features);
-    n_units = n_units_coherence;
-
-    fprintf('  Remaining units:\n');
-    fprintf('    Coherence: %d units\n', n_units_coherence);
-    fprintf('    Phase narrow: %d units\n', n_units_phase_narrow);
-    fprintf('    Phase broad: %d units\n', n_units_phase_broad);
-    fprintf('    PSTH: %d units\n\n', n_units_psth);
-else
-    fprintf('No sessions excluded\n\n');
-end
-
-%% ========================================================================
-%  SECTION 3: BUILD COMPREHENSIVE FEATURE MATRIX
-%% ========================================================================
-
-fprintf('Building comprehensive feature matrix...\n');
-
-% Initialize storage
-all_features = [];
-feature_names = {};
-feature_categories = {};  % Track which category each feature belongs to
-
-% ----- COHERENCE FEATURES -----
-fprintf('  Adding coherence features...\n');
-
-% Narrow band coherence (3 features)
-coherence_narrow_names = {'Coh_1-3Hz', 'Coh_5-7Hz', 'Coh_8-10Hz'};
-coherence_narrow_vars = {'coherence_1_3Hz', 'coherence_5_7Hz', 'coherence_8_10Hz'};
-
-for i = 1:3
-    all_features(:, end+1) = [coherence_features.(coherence_narrow_vars{i})]';
-    feature_names{end+1} = coherence_narrow_names{i};
-    feature_categories{end+1} = 'Coherence';
-end
-
-% Broad band coherence (6 features)
-coherence_broad_names = {'Coh_Delta', 'Coh_Theta', 'Coh_Beta', 'Coh_LowGamma', 'Coh_HighGamma', 'Coh_UltraGamma'};
-coherence_broad_vars = {'coherence_delta', 'coherence_theta', 'coherence_beta', ...
-                        'coherence_low_gamma', 'coherence_high_gamma', 'coherence_ultra_gamma'};
-
-for i = 1:6
-    all_features(:, end+1) = [coherence_features.(coherence_broad_vars{i})]';
-    feature_names{end+1} = coherence_broad_names{i};
-    feature_categories{end+1} = 'Coherence';
-end
-
-% Peak coherence (2 features)
-all_features(:, end+1) = [coherence_features.coherence_peak_freq]';
-feature_names{end+1} = 'Coh_PeakFreq';
-feature_categories{end+1} = 'Coherence';
-
-all_features(:, end+1) = [coherence_features.coherence_peak_mag]';
-feature_names{end+1} = 'Coh_PeakMag';
-feature_categories{end+1} = 'Coherence';
-
-% Firing rate (1 feature)
-all_features(:, end+1) = [coherence_features.firing_rate_mean]';
-feature_names{end+1} = 'FiringRate';
-feature_categories{end+1} = 'FiringRate';
-
-% Coefficient of Variation (1 feature)
-all_features(:, end+1) = [coherence_features.cv]';
-feature_names{end+1} = 'CV';
-feature_categories{end+1} = 'CV';
-
-fprintf('    Added %d coherence features\n', 11);
-fprintf('    Added 1 firing rate feature\n');
-fprintf('    Added 1 CV feature\n');
-
-% ----- PHASE COUPLING FEATURES (NARROW BANDS) -----
-fprintf('  Adding narrow-band phase coupling features...\n');
-
-narrow_bands = feat_config.narrow_bands;  % {'1-3Hz', '5-7Hz', '8-10Hz'}
-behaviors = feat_config.behavior_names;    % 7 behaviors
-
-% Extract MRL for each band × behavior (3 × 7 = 21 features)
-for band_idx = 1:length(narrow_bands)
-    for beh_idx = 1:length(behaviors)
-        % Extract MRL from all units
-        mrl_values = nan(n_units, 1);
-        for u = 1:min(n_units, n_units_phase_narrow)
-            mrl_values(u) = phase_narrow_features(u).phase_MRL_narrow(band_idx, beh_idx);
-        end
-
-        all_features(:, end+1) = mrl_values;
-
-        % Create feature name
-        band_clean = strrep(narrow_bands{band_idx}, '-', '_');
-        beh_clean = strrep(behaviors{beh_idx}, '/', '_');
-        beh_clean = strrep(beh_clean, ' ', '');
-        feature_names{end+1} = sprintf('MRL_N_%s_%s', band_clean, beh_clean);
-        feature_categories{end+1} = 'Phase_Narrow';
-    end
-end
-
-fprintf('    Added %d narrow-band phase features\n', length(narrow_bands) * length(behaviors));
-
-% ----- PHASE COUPLING FEATURES (BROAD BANDS) -----
-fprintf('  Adding broad-band phase coupling features...\n');
-
-broad_bands = feat_config.broad_bands;  % {'Delta', 'Theta', 'Beta', 'Low_Gamma', 'High_Gamma', 'Ultra_Gamma'}
-
-% Extract MRL for each band × behavior (6 × 7 = 42 features)
-for band_idx = 1:length(broad_bands)
-    for beh_idx = 1:length(behaviors)
-        % Extract MRL from all units
-        mrl_values = nan(n_units, 1);
-        for u = 1:min(n_units, n_units_phase_broad)
-            mrl_values(u) = phase_broad_features(u).phase_MRL_broad(band_idx, beh_idx);
-        end
-
-        all_features(:, end+1) = mrl_values;
-
-        % Create feature name
-        beh_clean = strrep(behaviors{beh_idx}, '/', '_');
-        beh_clean = strrep(beh_clean, ' ', '');
-        feature_names{end+1} = sprintf('MRL_B_%s_%s', broad_bands{band_idx}, beh_clean);
-        feature_categories{end+1} = 'Phase_Broad';
-    end
-end
-
-fprintf('    Added %d broad-band phase features\n', length(broad_bands) * length(behaviors));
-
-% ----- PSTH FEATURES (KEY EVENTS) -----
-fprintf('  Adding PSTH response features...\n');
-
-if ~isempty(psth_features)
-    % Key events to include
-    key_events = {'IR1ON', 'IR2ON', 'WP1ON', 'WP2ON', 'AversiveOnset', ...
-                  'Beh1_Onset', 'Beh2_Onset', 'Beh7_Onset', 'MovementOnset'};
-    key_event_labels = {'IR1', 'IR2', 'WP1', 'WP2', 'Aversive', ...
-                        'Reward', 'Walking', 'Standing', 'Movement'};
-
-    psth_feature_count = 0;
-    for e = 1:length(key_events)
-        event_name = key_events{e};
-        mean_z_field = [event_name '_mean_z_0to1sec'];
-        peak_z_field = [event_name '_peak_z'];
-
-        % Add mean Z-score if available
-        if isfield(psth_features, mean_z_field)
-            psth_values = nan(n_units, 1);
-            for u = 1:min(n_units, n_units_psth)
-                psth_values(u) = psth_features(u).(mean_z_field);
-            end
-            all_features(:, end+1) = psth_values;
-            feature_names{end+1} = sprintf('PSTH_%s_MeanZ', key_event_labels{e});
-            feature_categories{end+1} = 'PSTH';
-            psth_feature_count = psth_feature_count + 1;
-        end
-
-        % Add peak Z-score if available
-        if isfield(psth_features, peak_z_field)
-            psth_values = nan(n_units, 1);
-            for u = 1:min(n_units, n_units_psth)
-                psth_values(u) = psth_features(u).(peak_z_field);
-            end
-            all_features(:, end+1) = psth_values;
-            feature_names{end+1} = sprintf('PSTH_%s_PeakZ', key_event_labels{e});
-            feature_categories{end+1} = 'PSTH';
-            psth_feature_count = psth_feature_count + 1;
-        end
-    end
-    fprintf('    Added %d PSTH features\n', psth_feature_count);
-else
-    fprintf('    Skipped PSTH features (no data)\n');
-end
-
-fprintf('\n✓ Feature matrix built: %d units × %d features\n\n', size(all_features, 1), size(all_features, 2));
+fprintf('✓ Feature matrix prepared\n');
+fprintf('  Units: %d\n', n_units);
+fprintf('  Features: %d\n', length(feature_names));
+fprintf('  Categories: %s\n', strjoin(unique_categories, ', '));
+fprintf('  Aversive units: %d\n', sum(is_aversive));
+fprintf('  Reward units: %d\n\n', sum(~is_aversive));
 
 %% ========================================================================
 %  SECTION 4: FILTER FEATURE CATEGORIES (OPTIONAL)
@@ -323,9 +128,7 @@ fprintf('\n✓ Feature matrix built: %d units × %d features\n\n', size(all_feat
 
 if ~isempty(config.exclude_categories)
     fprintf('Filtering feature categories...\n');
-    fprintf('  Excluding: %s\n', strjoin(config.exclude_categories, ', '));
 
-    % Find features to keep (not in excluded categories)
     features_to_keep = true(size(feature_categories));
     for i = 1:length(feature_categories)
         if any(strcmp(feature_categories{i}, config.exclude_categories))
@@ -336,1274 +139,1183 @@ if ~isempty(config.exclude_categories)
     n_excluded = sum(~features_to_keep);
     fprintf('  Removing %d features from excluded categories\n', n_excluded);
 
-    % Filter the feature matrix and metadata
-    all_features = all_features(:, features_to_keep);
+    feature_matrix = feature_matrix(:, features_to_keep);
     feature_names = feature_names(features_to_keep);
     feature_categories = feature_categories(features_to_keep);
 
-    fprintf('✓ Filtered to %d features\n\n', size(all_features, 2));
-else
-    fprintf('No feature categories excluded\n\n');
+    fprintf('✓ Filtered to %d features\n\n', size(feature_matrix, 2));
 end
 
 %% ========================================================================
-%  SECTION 5: NORMALIZE FEATURES (OPTIONAL)
+%  SECTION 5: NORMALIZE FEATURES
 %% ========================================================================
 
 if config.normalize_features
     fprintf('Normalizing features (z-score)...\n');
-    all_features_normalized = nan(size(all_features));
+    feature_matrix_norm = nan(size(feature_matrix));
 
-    for f = 1:size(all_features, 2)
-        feature_col = all_features(:, f);
+    for f = 1:size(feature_matrix, 2)
+        feature_col = feature_matrix(:, f);
         valid_data = feature_col(~isnan(feature_col));
 
         if ~isempty(valid_data) && std(valid_data) > 0
-            % Z-score normalization
-            all_features_normalized(:, f) = (feature_col - mean(valid_data)) / std(valid_data);
+            feature_matrix_norm(:, f) = (feature_col - mean(valid_data)) / std(valid_data);
         else
-            all_features_normalized(:, f) = feature_col;
+            feature_matrix_norm(:, f) = feature_col;
         end
     end
 
-    feature_matrix = all_features_normalized;
+    feature_matrix = feature_matrix_norm;
     fprintf('✓ Features normalized\n\n');
-else
-    feature_matrix = all_features;
 end
 
 %% ========================================================================
-%  SECTION 6: DETERMINE SORTING ORDER (UNITS AND/OR FEATURES)
+%  SECTION 6: COMPREHENSIVE CLUSTERING AND VISUALIZATION
 %% ========================================================================
 
-fprintf('Determining sorting order...\n');
-fprintf('  Cluster dimension: %s\n', config.cluster_dimension);
-fprintf('  Sort method: %s\n', config.sort_method);
-fprintf('  Separate by session: %d\n', config.separate_by_session);
-
-% Get session types and session IDs for all units
-session_types = {coherence_features.session_type};
-is_aversive = contains(session_types, 'Aversive');
-
-% Extract session IDs - check which field is available
-if isfield(coherence_features, 'session_id')
-    session_ids = {coherence_features.session_id};
-elseif isfield(coherence_features, 'unit_id')
-    % Extract session ID from unit_id (format might be 'SessionID_UnitID')
-    unit_ids = {coherence_features.unit_id};
-    session_ids = cellfun(@(x) extractBefore(x, '_'), unit_ids, 'UniformOutput', false);
-    % If no underscore, use the whole unit_id
-    for i = 1:length(session_ids)
-        if isempty(session_ids{i})
-            session_ids{i} = unit_ids{i};
-        end
-    end
-else
-    % If no session ID field, create generic IDs based on session type
-    warning('No session_id or unit_id field found, using generic session IDs');
-    session_ids = arrayfun(@(x) sprintf('Session%03d', x), 1:length(session_types), 'UniformOutput', false);
-end
-
-% If analyzing separately, we'll need to store results for each session type
-if config.separate_by_session
-    session_results = struct();
-    session_types_list = {'Aversive', 'Reward'};
-
-    for s = 1:length(session_types_list)
-        sess_name = session_types_list{s};
-        fprintf('\n--- Processing %s sessions ---\n', sess_name);
-
-        % Select units for this session type
-        if strcmp(sess_name, 'Aversive')
-            sess_units = is_aversive;
-        else
-            sess_units = ~is_aversive;
-        end
-
-        fprintf('  %d units in %s sessions\n', sum(sess_units), sess_name);
-
-        % Extract subset of feature matrix
-        sess_feature_matrix = feature_matrix(sess_units, :);
-        sess_session_types = session_types(sess_units);
-        sess_is_aversive = is_aversive(sess_units);
-
-        % Perform clustering/sorting for this session
-        [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tree] = ...
-            perform_sorting(sess_feature_matrix, sess_is_aversive, feature_names, config);
-
-        % Store results
-        session_results(s).session_name = sess_name;
-        session_results(s).unit_indices = find(sess_units);  % Original indices
-        session_results(s).unit_sort_idx = unit_sort_idx;
-        session_results(s).feature_sort_idx = feature_sort_idx;
-        session_results(s).unit_linkage_tree = unit_linkage_tree;
-        session_results(s).feature_linkage_tree = feature_linkage_tree;
-        session_results(s).feature_matrix = sess_feature_matrix;
-        session_results(s).session_types = sess_session_types;
-        session_results(s).is_aversive = sess_is_aversive;
-    end
-
-    fprintf('\n✓ Sorting order determined for both session types\n\n');
-
-else
-    % Original behavior: analyze all units together
-    fprintf('  Analyzing all sessions together\n');
-
-    % Initialize
-    unit_sort_idx = 1:size(feature_matrix, 1);
-    feature_sort_idx = 1:size(feature_matrix, 2);
-    unit_linkage_tree = [];
-    feature_linkage_tree = [];
-
-% --- UNIT SORTING (only if clustering units or both) ---
-if strcmp(config.cluster_dimension, 'units') || strcmp(config.cluster_dimension, 'both')
-    fprintf('  Clustering/sorting units...\n');
-
-    switch config.sort_method
-        case 'session_type'
-            % Simple sort: Aversive first, then Reward
-            aversive_idx = find(is_aversive);
-            reward_idx = find(~is_aversive);
-            unit_sort_idx = [aversive_idx, reward_idx];
-
-        case 'hierarchical'
-            % Hierarchical clustering of units
-            % Remove units with too many NaNs
-            valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-            feature_matrix_clean = feature_matrix(valid_units, :);
-
-            % Replace remaining NaNs with column mean
-            for f = 1:size(feature_matrix_clean, 2)
-                col = feature_matrix_clean(:, f);
-                col(isnan(col)) = nanmean(col);
-                feature_matrix_clean(:, f) = col;
-            end
-
-            % Compute distance and linkage
-            distances = pdist(feature_matrix_clean, 'euclidean');
-            unit_linkage_tree = linkage(distances, 'ward');
-
-            % Get dendrogram order
-            [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
-
-            % Map back to original indices
-            valid_idx = find(valid_units);
-            unit_sort_idx = valid_idx(sort_idx_clean);
-
-        case 'pca'
-            % Sort by first principal component
-            % Remove NaNs
-            valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-            feature_matrix_clean = feature_matrix(valid_units, :);
-
-            for f = 1:size(feature_matrix_clean, 2)
-                col = feature_matrix_clean(:, f);
-                col(isnan(col)) = nanmean(col);
-                feature_matrix_clean(:, f) = col;
-            end
-
-            % PCA
-            [coeff, score, ~] = pca(feature_matrix_clean);
-
-            % Sort by PC1
-            [~, sort_idx_clean] = sort(score(:, 1));
-
-            % Map back to original indices
-            valid_idx = find(valid_units);
-            unit_sort_idx = valid_idx(sort_idx_clean);
-
-        case 'feature'
-            % Sort by specific feature
-            feature_idx = find(strcmp(feature_names, config.feature_to_sort));
-            if isempty(feature_idx)
-                fprintf('    WARNING: Feature %s not found, using default sort\n', config.feature_to_sort);
-                [~, unit_sort_idx] = sortrows([is_aversive',feature_matrix], [0,3]+1 ,'descend', 'MissingPlacement', 'last');
-            else
-                [~, unit_sort_idx] = sort(feature_matrix(:, feature_idx), 'descend', 'MissingPlacement', 'last');
-            end
-
-        otherwise
-            % Default: session type
-            aversive_idx = find(is_aversive);
-            reward_idx = find(~is_aversive);
-            unit_sort_idx = [aversive_idx, reward_idx];
-    end
-    fprintf('    ✓ Units sorted\n');
-end
-
-% --- FEATURE SORTING (only if clustering features or both) ---
-if strcmp(config.cluster_dimension, 'features') || strcmp(config.cluster_dimension, 'both')
-    fprintf('  Clustering features...\n');
-
-    % Hierarchical clustering of features
-    % Transpose the matrix (features as rows)
-    % Remove features with too many NaNs
-    valid_features = sum(~isnan(feature_matrix), 1) > size(feature_matrix, 1) * 0.5;
-    feature_matrix_transposed = feature_matrix(:, valid_features)';
-
-    % Replace remaining NaNs with row mean
-    for u = 1:size(feature_matrix_transposed, 2)
-        col = feature_matrix_transposed(:, u);
-        col(isnan(col)) = nanmean(col);
-        feature_matrix_transposed(:, u) = col;
-    end
-
-    % Compute distance and linkage
-    distances_features = pdist(feature_matrix_transposed, 'euclidean');
-    feature_linkage_tree = linkage(distances_features, 'ward');
-
-    % Get dendrogram order
-    [~, ~, feature_sort_idx_clean] = dendrogram(feature_linkage_tree, 0);
-
-    % Map back to original indices
-    valid_feat_idx = find(valid_features);
-    feature_sort_idx = valid_feat_idx(feature_sort_idx_clean);
-    fprintf('    ✓ Features sorted\n');
-end
-
-    fprintf('✓ Sorting order determined\n\n');
-end  % End of else block (combined analysis)
-
-%% ========================================================================
-%  SECTION 7: CREATE COMPREHENSIVE HEATMAP
-%% ========================================================================
-
-fprintf('Creating comprehensive heatmap...\n');
-
-% Determine how many plots to create
-if config.separate_by_session
-    n_plots = 2;  % One for each session type
-    plot_names = {'Aversive', 'Reward'};
-else
-    n_plots = 1;  % Combined plot
-    plot_names = {'Combined'};
-end
-
-for plot_idx = 1:n_plots
-
-    if config.separate_by_session
-        fprintf('  Creating heatmap for %s sessions...\n', plot_names{plot_idx});
-
-        % Get data for this session type
-        sess_data = session_results(plot_idx);
-        feature_matrix_plot = sess_data.feature_matrix;
-        unit_sort_idx = sess_data.unit_sort_idx;
-        feature_sort_idx = sess_data.feature_sort_idx;
-        unit_linkage_tree = sess_data.unit_linkage_tree;
-        feature_linkage_tree = sess_data.feature_linkage_tree;
-        session_types_plot = sess_data.session_types;
-        is_aversive_plot = sess_data.is_aversive;
-
-        % Reorder matrix
-        feature_matrix_sorted = feature_matrix_plot(unit_sort_idx, feature_sort_idx);
-        session_types_sorted = session_types_plot(unit_sort_idx);
-        is_aversive_sorted = is_aversive_plot(unit_sort_idx);
-        feature_names_sorted = feature_names(feature_sort_idx);
-        feature_categories_sorted = feature_categories(feature_sort_idx);
-
-        % Create figure
-        fig = figure('Position', [50 + (plot_idx-1)*100 50 + (plot_idx-1)*50 2000 1200], ...
-                     'Name', sprintf('%s Sessions - Unit Feature Heatmap', plot_names{plot_idx}));
-    else
-        % Combined analysis - original behavior
-        feature_matrix_sorted = feature_matrix(unit_sort_idx, feature_sort_idx);
-        session_types_sorted = session_types(unit_sort_idx);
-        is_aversive_sorted = is_aversive(unit_sort_idx);
-        feature_names_sorted = feature_names(feature_sort_idx);
-        feature_categories_sorted = feature_categories(feature_sort_idx);
-
-        % Create figure
-        fig = figure('Position', [50 50 2000 1200], 'Name', 'Comprehensive Unit Feature Heatmap');
-    end
-
-% Determine subplot positions based on clustering dimension
-if strcmp(config.cluster_dimension, 'both')
-    % Both dendrograms
-    has_unit_dendrogram = config.show_dendrogram && ~isempty(unit_linkage_tree);
-    has_feature_dendrogram = config.show_dendrogram && ~isempty(feature_linkage_tree);
-
-    heatmap_left = 0.17;
-    heatmap_bottom = 0.15;
-    heatmap_width = 0.65;
-    heatmap_height = 0.65;
-
-elseif strcmp(config.cluster_dimension, 'units')
-    % Only unit dendrogram on left
-    has_unit_dendrogram = config.show_dendrogram && ~isempty(unit_linkage_tree);
-    has_feature_dendrogram = false;
-
-    if has_unit_dendrogram
-        heatmap_left = 0.17;
-    else
-        heatmap_left = 0.08;
-    end
-    heatmap_bottom = 0.15;
-    heatmap_width = 0.70;
-    heatmap_height = 0.75;
-
-else  % 'features'
-    % Only feature dendrogram on top
-    has_unit_dendrogram = false;
-    has_feature_dendrogram = config.show_dendrogram && ~isempty(feature_linkage_tree);
-
-    heatmap_left = 0.08;
-    if has_feature_dendrogram
-        heatmap_bottom = 0.15;
-        heatmap_height = 0.65;
-    else
-        heatmap_bottom = 0.15;
-        heatmap_height = 0.75;
-    end
-    heatmap_width = 0.78;
-end
-
-% --- Draw Unit Dendrogram (if applicable) ---
-if has_unit_dendrogram
-    subplot('Position', [0.05 heatmap_bottom 0.10 heatmap_height]);
-    dendrogram(unit_linkage_tree, 0, 'Orientation', 'left');
-    set(gca, 'YDir', 'reverse');
-    set(gca, 'XTickLabel', []);
-    ylabel('Units');
-    title('Unit Clustering');
-end
-
-% --- Draw Feature Dendrogram (if applicable) ---
-if has_feature_dendrogram
-    subplot('Position', [heatmap_left 0.82 heatmap_width 0.10]);
-    dendrogram(feature_linkage_tree, 0, 'Orientation', 'top');
-    set(gca, 'XDir', 'normal');
-    set(gca, 'YTickLabel', []);
-    xlabel('Features');
-    title('Feature Clustering');
-end
-
-% --- Draw Main Heatmap ---
-subplot('Position', [heatmap_left heatmap_bottom heatmap_width heatmap_height]);
-
-% Plot heatmap (units on Y-axis, features on X-axis)
-imagesc(feature_matrix_sorted);
-axis tight;
-
-% Set colormap
-switch config.colormap_name
-    case 'bluewhitered'
-        colormap(bluewhitered(256));
-        if config.normalize_features
-            caxis([-3 3]);  % For z-scored data
-        end
-    case 'redblue'
-        colormap(redblue(256));
-        if config.normalize_features
-            caxis([-3 3]);
-        end
-    otherwise
-        colormap(config.colormap_name);
-end
-
-% Add colorbar
-cb = colorbar;
-cb.Position = [0.90 heatmap_bottom 0.02 heatmap_height];
-if config.normalize_features
-    ylabel(cb, 'Z-score', 'FontSize', 11);
-else
-    ylabel(cb, 'Feature Value', 'FontSize', 11);
-end
-
-% Labels
-xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
-ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
-
-% X-axis: Feature names (rotated for readability)
-set(gca, 'XTick', 1:length(feature_names_sorted));
-set(gca, 'XTickLabel', feature_names_sorted);
-set(gca, 'XTickLabelRotation', 90);
-set(gca, 'FontSize', 8);
-
-% Y-axis: Unit indices
-set(gca, 'YTick', []);
-
-% --- Add session type color bar on LEFT (for units on Y-axis) ---
-if has_unit_dendrogram
-    session_bar_left = 0.15;
-else
-    session_bar_left = 0.06;
-end
-subplot('Position', [session_bar_left heatmap_bottom 0.01 heatmap_height]);
-session_type_colors = zeros(length(unit_sort_idx), 1, 3);
-for i = 1:length(unit_sort_idx)
-    if is_aversive_sorted(i)
-        session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
-    else
-        session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
-    end
-end
-image(session_type_colors);
-set(gca, 'XTick', [], 'YTick', []);
-xlabel('Session', 'FontSize', 9, 'Rotation', 0);
-
-% --- Add feature category color bar (position depends on dendrogram) ---
-if has_feature_dendrogram
-    category_bar_bottom = 0.80;
-else
-    category_bar_bottom = 0.91;
-end
-subplot('Position', [heatmap_left category_bar_bottom heatmap_width 0.01]);
-unique_categories = unique(feature_categories, 'stable');
-category_colors = lines(length(unique_categories));
-feature_category_img = zeros(1, length(feature_names_sorted), 3);
-
-for i = 1:length(feature_names_sorted)
-    cat_idx = find(strcmp(unique_categories, feature_categories_sorted{i}));
-    feature_category_img(1, i, :) = category_colors(cat_idx, :);
-end
-
-image(feature_category_img);
-set(gca, 'XTick', [], 'YTick', []);
-ylabel('Category', 'FontSize', 9, 'Rotation', 0, 'HorizontalAlignment', 'right');
-
-% --- Add title ---
-if has_feature_dendrogram
-    title_bottom = 0.94;
-else
-    title_bottom = 0.94;
-end
+fprintf('=== COMPREHENSIVE CLUSTERING ===\n\n');
 
 if config.separate_by_session
-    title_str = sprintf('%s Sessions: %d units × %d features | Cluster: %s | Sort: %s', ...
-        plot_names{plot_idx}, size(feature_matrix_sorted, 1), size(feature_matrix_sorted, 2), ...
-        config.cluster_dimension, config.sort_method);
+    session_types_to_analyze = {'Aversive', 'Reward'};
 else
-    title_str = sprintf('Comprehensive Unit Features (%d units × %d features) | Cluster: %s | Sort: %s', ...
-        size(feature_matrix_sorted, 1), size(feature_matrix_sorted, 2), ...
-        config.cluster_dimension, config.sort_method);
+    session_types_to_analyze = {'Combined'};
 end
 
-annotation('textbox', [heatmap_left title_bottom heatmap_width 0.05], 'String', title_str, ...
-    'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
-    'HorizontalAlignment', 'center');
+% Store clustering results for feature importance analysis
+clustering_results = struct();
 
-% --- Add legend for categories ---
-legend_str = sprintf('Categories: ');
-for i = 1:length(unique_categories)
-    legend_str = [legend_str, sprintf('%s | ', unique_categories{i})];
+for sess_type_idx = 1:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
+
+    fprintf('--- Processing %s sessions ---\n', sess_name);
+
+    % Select units
+    if strcmp(sess_name, 'Aversive')
+        unit_mask = is_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        unit_mask = ~is_aversive;
+    else
+        unit_mask = true(n_units, 1);
+    end
+
+    sess_feature_matrix = feature_matrix(unit_mask, :);
+    sess_session_ids = session_ids(unit_mask);
+    sess_is_aversive = is_aversive(unit_mask);
+    n_sess_units = sum(unit_mask);
+
+    fprintf('  Units: %d\n', n_sess_units);
+
+    % Select session-specific cluster threshold
+    if strcmp(sess_name, 'Aversive')
+        cluster_threshold = config.cluster_threshold_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        cluster_threshold = config.cluster_threshold_reward;
+    else
+        % For 'Combined', use Aversive threshold as default
+        cluster_threshold = config.cluster_threshold_aversive;
+    end
+
+    % Perform hierarchical clustering
+    [unit_sort_idx, linkage_tree, cluster_assignments] = perform_clustering(...
+        sess_feature_matrix, cluster_threshold);
+
+    n_clusters = max(cluster_assignments(~isnan(cluster_assignments)));
+    fprintf('  Clusters: %d\n', n_clusters);
+
+    % Get unique unit IDs for these units
+    sess_unique_unit_ids = master_features.UniqueUnitID(unit_mask);
+    sess_session_names = master_features.Session(unit_mask);
+    sess_unit_numbers = master_features.Unit(unit_mask);
+
+    % Store results for feature importance analysis
+    clustering_results.(sess_name).feature_matrix = sess_feature_matrix;
+    clustering_results.(sess_name).cluster_assignments = cluster_assignments;
+    clustering_results.(sess_name).n_clusters = n_clusters;
+    clustering_results.(sess_name).unit_mask = unit_mask;
+    clustering_results.(sess_name).unique_unit_ids = sess_unique_unit_ids;
+    clustering_results.(sess_name).session_names = sess_session_names;
+    clustering_results.(sess_name).unit_numbers = sess_unit_numbers;
+
+    % Create comprehensive heatmap
+    create_comprehensive_heatmap(sess_feature_matrix, feature_names, feature_categories, ...
+        unit_sort_idx, linkage_tree, sess_is_aversive, sess_name, config, cluster_threshold);
+
+    % Analyze cluster composition
+    analyze_cluster_composition(cluster_assignments, sess_session_ids, sess_name, linkage_tree, config, cluster_threshold);
+
+    fprintf('✓ %s sessions complete\n\n', sess_name);
 end
-annotation('textbox', [0.05 0.05 0.90 0.05], 'String', legend_str, ...
-    'EdgeColor', 'none', 'FontSize', 10, 'HorizontalAlignment', 'center');
 
-end  % End of for loop over plots (separate sessions or combined)
+% Save cluster assignments with unique unit IDs
+fprintf('Saving cluster assignments...\n');
+cluster_assignments_output = struct();
+cluster_assignments_output.config = config;
+cluster_assignments_output.timestamp = datetime('now');
 
-fprintf('✓ Heatmap(s) created\n\n');
+for sess_type_idx = 1:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
 
+    if ~isfield(clustering_results, sess_name)
+        continue;
+    end
+
+    % Create table with unit IDs and cluster assignments
+    unit_cluster_table = table();
+    unit_cluster_table.UniqueUnitID = clustering_results.(sess_name).unique_unit_ids;
+    unit_cluster_table.Session = clustering_results.(sess_name).session_names;
+    unit_cluster_table.Unit = clustering_results.(sess_name).unit_numbers;
+    unit_cluster_table.ClusterID = clustering_results.(sess_name).cluster_assignments;
+    unit_cluster_table.SessionType = repmat({sess_name}, height(unit_cluster_table), 1);
+
+    % Store in output structure
+    cluster_assignments_output.(sess_name) = unit_cluster_table;
+
+    % Print summary
+    valid_assignments = ~isnan(unit_cluster_table.ClusterID);
+    fprintf('  %s: %d units assigned to %d clusters\n', ...
+        sess_name, sum(valid_assignments), clustering_results.(sess_name).n_clusters);
+end
+
+% Save to file
+save('unit_cluster_assignments.mat', 'cluster_assignments_output');
+fprintf('✓ Saved to: unit_cluster_assignments.mat\n\n');
 
 %% ========================================================================
-%  SIMPLIFIED 6-FEATURE CLUSTERING ANALYSIS
+%  SECTION 6b: PCA-BASED COMPREHENSIVE CLUSTERING
 %% ========================================================================
 
-fprintf('\n=== SIMPLIFIED 6-FEATURE CLUSTERING ===\n\n');
+fprintf('=== PCA-BASED COMPREHENSIVE CLUSTERING ===\n\n');
+fprintf('Performing clustering using first 5 principal components...\n\n');
 
-simplified_feature_names = {
-    'Coh_5-7Hz',           % Coherence 5-7Hz
-    'Coh_8-10Hz',          % Coherence 8-10Hz
-    'PSTH_Reward_MeanZ',   % PSTH PSTH Reward Mean Z-score
-    'PSTH_Aversive_MeanZ', % PSTH Aversive mean z-score
-    'FiringRate'           % Mean firing rate (Hz)
+for sess_type_idx = 1:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
+
+    fprintf('--- Processing %s sessions (PCA) ---\n', sess_name);
+
+    % Select units
+    if strcmp(sess_name, 'Aversive')
+        unit_mask = is_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        unit_mask = ~is_aversive;
+    else
+        unit_mask = true(n_units, 1);
+    end
+
+    sess_feature_matrix = feature_matrix(unit_mask, :);
+    sess_session_ids = session_ids(unit_mask);
+    sess_is_aversive = is_aversive(unit_mask);
+    n_sess_units = sum(unit_mask);
+
+    fprintf('  Units: %d\n', n_sess_units);
+
+    % Perform PCA on the feature matrix
+    fprintf('  Performing PCA...\n');
+    [coeff, score, latent, ~, explained] = pca(sess_feature_matrix, 'NumComponents', 5);
+
+    fprintf('  Variance explained by first 5 PCs: %.1f%%\n', sum(explained(1:5)));
+    fprintf('    PC1: %.1f%%, PC2: %.1f%%, PC3: %.1f%%, PC4: %.1f%%, PC5: %.1f%%\n', ...
+        explained(1), explained(2), explained(3), explained(4), explained(5));
+
+    % Use first 5 PCs for clustering
+    pca_features = score(:, 1:5);
+
+    % Select session-specific cluster threshold
+    if strcmp(sess_name, 'Aversive')
+        cluster_threshold = config.cluster_threshold_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        cluster_threshold = config.cluster_threshold_reward;
+    else
+        cluster_threshold = config.cluster_threshold_aversive;
+    end
+
+    %% Perform hierarchical clustering on PCA features
+    [unit_sort_idx, linkage_tree, cluster_assignments] = perform_clustering(...
+        pca_features, cluster_threshold);
+
+    n_clusters = max(cluster_assignments(~isnan(cluster_assignments)));
+    fprintf('  Clusters: %d\n', n_clusters);
+
+    % Create PCA-based heatmap
+    create_pca_heatmap(pca_features, unit_sort_idx, linkage_tree, ...
+        cluster_assignments, sess_is_aversive, sess_name, explained(1:5), ...
+        config, cluster_threshold);
+
+    % Create PC loadings heatmap
+    create_pca_loadings_heatmap(coeff(:, 1:5), feature_names, explained(1:5), ...
+        sess_name, feature_categories);
+
+    % Analyze cluster composition
+    analyze_cluster_composition(cluster_assignments, sess_session_ids, ...
+        [sess_name '_PCA'], linkage_tree, config, cluster_threshold);
+
+    fprintf('✓ PCA-based %s clustering complete\n\n', sess_name);
+end
+
+%% ========================================================================
+%  SECTION 7: FEATURE IMPORTANCE ANALYSIS
+%% ========================================================================
+
+fprintf('=== FEATURE IMPORTANCE ANALYSIS ===\n\n');
+fprintf('Analyzing which features best discriminate between clusters...\n\n');
+
+% Store feature importance results
+feature_importance_results = struct();
+
+for sess_type_idx = 1%:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
+
+    fprintf('--- %s sessions ---\n', sess_name);
+
+    % Get clustering results
+    sess_data = clustering_results.(sess_name);
+    n_clusters = sess_data.n_clusters;
+
+    % Check if we have valid clusters
+    if isnan(n_clusters) || n_clusters < 2
+        fprintf('  Skipping: insufficient clusters (n=%d)\n\n', n_clusters);
+        continue;
+    end
+
+    fprintf('  Analyzing %d clusters...\n', n_clusters);
+
+    % Get valid units (those with cluster assignments)
+    valid_units = ~isnan(sess_data.cluster_assignments);
+    feature_matrix_valid = sess_data.feature_matrix(valid_units, :);
+    cluster_labels = sess_data.cluster_assignments(valid_units);
+
+    % 1. Global feature importance (ANOVA + effect sizes)
+    fprintf('  Computing global feature importance...\n');
+    [feature_pvalues, feature_effect_sizes, feature_rankings] = ...
+        compute_global_feature_importance(feature_matrix_valid, cluster_labels, feature_names);
+
+    % 2. Pairwise cluster discrimination
+    fprintf('  Computing pairwise cluster discrimination...\n');
+    [pairwise_discrimination, top_features_per_pair] = ...
+        compute_pairwise_discrimination(feature_matrix_valid, cluster_labels, feature_names, n_clusters);
+
+    % 3. Random Forest feature importance
+    fprintf('  Computing Random Forest feature importance...\n');
+    [rf_importance, rf_rankings] = ...
+        compute_random_forest_importance(feature_matrix_valid, cluster_labels, feature_names);
+
+    % 4. Recursive Feature Elimination with cluster validation
+    fprintf('  Performing Recursive Feature Elimination...\n');
+    [rfe_selected_features, rfe_quality_curve, rfe_rankings] = ...
+        perform_rfe_with_validation(feature_matrix_valid, cluster_labels, feature_names, ...
+        config.rfe_min_features, config.rfe_quality_threshold);
+
+    % 5. Create visualizations
+    fprintf('  Creating visualizations...\n');
+
+    % Feature importance heatmap
+    create_feature_importance_heatmap(feature_matrix_valid, cluster_labels, ...
+        feature_names, feature_categories, feature_rankings, sess_name);
+
+    % Pairwise discrimination heatmap
+    create_pairwise_discrimination_heatmap(pairwise_discrimination, feature_names, ...
+        n_clusters, sess_name);
+
+    % Top features bar plot (univariate)
+    create_top_features_plot(feature_rankings, feature_names, feature_pvalues, ...
+        feature_effect_sizes, sess_name);
+
+    % RFE quality curve visualization
+    create_rfe_quality_plot(rfe_quality_curve, rfe_selected_features, feature_names, sess_name);
+
+    % Feature importance comparison plot
+    create_feature_comparison_plot(feature_rankings, rf_rankings, rfe_rankings, ...
+        feature_names, feature_effect_sizes, rf_importance, sess_name);
+
+    % Store results
+    feature_importance_results.(sess_name).univariate_rankings = feature_rankings;
+    feature_importance_results.(sess_name).pvalues = feature_pvalues;
+    feature_importance_results.(sess_name).effect_sizes = feature_effect_sizes;
+    feature_importance_results.(sess_name).rf_rankings = rf_rankings;
+    feature_importance_results.(sess_name).rf_importance = rf_importance;
+    feature_importance_results.(sess_name).rfe_selected = rfe_selected_features;
+    feature_importance_results.(sess_name).rfe_rankings = rfe_rankings;
+    feature_importance_results.(sess_name).rfe_quality_curve = rfe_quality_curve;
+    feature_importance_results.(sess_name).pairwise_discrimination = pairwise_discrimination;
+    feature_importance_results.(sess_name).top_features_per_pair = top_features_per_pair;
+
+    % Print top features from all three methods
+    fprintf('\n  === METHOD 1: UNIVARIATE (Top 15) ===\n');
+    for i = 1:min(15, length(feature_rankings))
+        feat_idx = feature_rankings(i);
+        fprintf('  %2d. %-30s (η²=%.3f, p=%.2e)\n', ...
+            i, feature_names{feat_idx}, feature_effect_sizes(feat_idx), feature_pvalues(feat_idx));
+    end
+
+    fprintf('\n  === METHOD 2: RANDOM FOREST (Top 15) ===\n');
+    for i = 1:min(15, length(rf_rankings))
+        feat_idx = rf_rankings(i);
+        fprintf('  %2d. %-30s (Importance=%.4f)\n', ...
+            i, feature_names{feat_idx}, rf_importance(feat_idx));
+    end
+
+    fprintf('\n  === METHOD 3: RFE (Selected %d features) ===\n', length(rfe_selected_features));
+    for i = 1:length(rfe_selected_features)
+        feat_idx = rfe_selected_features(i);
+        fprintf('  %2d. %s\n', i, feature_names{feat_idx});
+    end
+    fprintf('\n');
+
+    fprintf('✓ %s feature importance analysis complete\n\n', sess_name);
+end
+
+% Print recommended minimal feature sets from all methods
+fprintf('=== RECOMMENDED FEATURE SETS (BY METHOD) ===\n\n');
+for sess_type_idx = 1%:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
+
+    if ~isfield(feature_importance_results, sess_name)
+        continue;
+    end
+
+    fprintf('%s sessions:\n', sess_name);
+
+    % Univariate
+    univ_rankings = feature_importance_results.(sess_name).univariate_rankings;
+    fprintf('  Univariate (Top 10): %s\n', strjoin(feature_names(univ_rankings(1:min(10, length(univ_rankings)))), ', '));
+
+    % Random Forest
+    rf_rankings = feature_importance_results.(sess_name).rf_rankings;
+    fprintf('  RandomForest (Top 10): %s\n', strjoin(feature_names(rf_rankings(1:min(10, length(rf_rankings)))), ', '));
+
+    % RFE
+    rfe_selected = feature_importance_results.(sess_name).rfe_selected;
+    fprintf('  RFE (%d features): %s\n\n', length(rfe_selected), strjoin(feature_names(rfe_selected), ', '));
+end
+
+fprintf('✓ Feature importance analysis complete\n\n');
+
+%% ========================================================================
+%  SECTION 8: SIMPLIFIED CLUSTERING (KEY FEATURES ONLY)
+%% ========================================================================
+
+fprintf('=== SIMPLIFIED CLUSTERING (KEY FEATURES) ===\n\n');
+
+% Manual feature list (fallback if feature importance not available)
+manual_feature_names = {
+    'PPC_LFP_low', 'PPC_LFP_high', ...
+    'PPC_Breath_low', 'PPC_Breath_high', ...
+    'Coherence_LFP_low', 'Coherence_LFP_high', ...
+    'FR', 'CV', 'BurstIndex'
 };
 
-% Extract these features from the full feature matrix
-simplified_matrix = [];
-simplified_names_found = {};
-simplified_indices = [];
-
-for i = 1:length(simplified_feature_names)
-    feat_idx = find(strcmp(feature_names, simplified_feature_names{i}));
-    if ~isempty(feat_idx)
-        simplified_matrix(:, end+1) = feature_matrix(:, feat_idx);
-        simplified_names_found{end+1} = simplified_feature_names{i};
-        simplified_indices(end+1) = feat_idx;
-    else
-        fprintf('  WARNING: Feature "%s" not found, skipping\n', simplified_feature_names{i});
-    end
-end
-
-fprintf('Found %d/%d features for simplified analysis\n', length(simplified_names_found), length(simplified_feature_names));
-
-if size(simplified_matrix, 2) < 3
-    fprintf('ERROR: Not enough features found for simplified clustering (need at least 3)\n');
+% Determine feature selection method
+if config.use_data_driven_features && exist('feature_importance_results', 'var') && ~isempty(fieldnames(feature_importance_results))
+    fprintf('Using DATA-DRIVEN feature selection: %s\n\n', config.feature_selection_method);
+    use_session_specific_features = true;
 else
-    % Normalize the simplified feature matrix
-    simplified_matrix_norm = nan(size(simplified_matrix));
-    for f = 1:size(simplified_matrix, 2)
-        feature_col = simplified_matrix(:, f);
-        valid_data = feature_col(~isnan(feature_col));
+    fprintf('Using MANUAL feature selection (%d predefined features)\n\n', length(manual_feature_names));
+    use_session_specific_features = false;
 
-        if ~isempty(valid_data) && std(valid_data) > 0
-            simplified_matrix_norm(:, f) = (feature_col - mean(valid_data)) / std(valid_data);
+    % Find indices of manual features
+    key_feature_idx = [];
+    key_feature_names_found = {};
+    for i = 1:length(manual_feature_names)
+        idx = find(strcmp(feature_names, manual_feature_names{i}), 1);
+        if ~isempty(idx)
+            key_feature_idx(end+1) = idx;
+            key_feature_names_found{end+1} = manual_feature_names{i};
+        end
+    end
+    fprintf('Found %d/%d manual features\n\n', length(key_feature_idx), length(manual_feature_names));
+end
+
+for sess_type_idx = 1:length(session_types_to_analyze)
+    sess_name = session_types_to_analyze{sess_type_idx};
+
+    fprintf('--- Simplified clustering for %s sessions ---\n', sess_name);
+
+    % Select features for this session
+    if use_session_specific_features
+        % Use session-specific features based on selected method
+        if isfield(feature_importance_results, sess_name)
+            switch config.feature_selection_method
+                case 'Univariate'
+                    rankings = feature_importance_results.(sess_name).univariate_rankings;
+                    n_features_to_use = min(config.n_top_features, length(rankings));
+                    key_feature_idx = rankings(1:n_features_to_use);
+                    fprintf('  Using top %d features from UNIVARIATE method\n', n_features_to_use);
+
+                case 'RandomForest'
+                    rankings = feature_importance_results.(sess_name).rf_rankings;
+                    n_features_to_use = min(config.n_top_features, length(rankings));
+                    key_feature_idx = rankings(1:n_features_to_use);
+                    fprintf('  Using top %d features from RANDOM FOREST method\n', n_features_to_use);
+
+                case 'RFE'
+                    key_feature_idx = feature_importance_results.(sess_name).rfe_selected;
+                    n_features_to_use = length(key_feature_idx);
+                    fprintf('  Using %d features from RFE method\n', n_features_to_use);
+
+                otherwise
+                    error('Unknown feature selection method: %s', config.feature_selection_method);
+            end
+
+            key_feature_names_found = feature_names(key_feature_idx);
+
+            fprintf('  Selected features:\n');
+            for i = 1:min(5, n_features_to_use)
+                fprintf('    %d. %s\n', i, key_feature_names_found{i});
+            end
+            if n_features_to_use > 5
+                fprintf('    ... and %d more\n', n_features_to_use - 5);
+            end
         else
-            simplified_matrix_norm(:, f) = feature_col;
+            fprintf('  No feature importance results available, skipping...\n\n');
+            continue;
         end
     end
 
-    % Determine how many plots to create (separate by session or combined)
-    if config.separate_by_session
-        n_simple_plots = 2;
-        simple_plot_names = {'Aversive', 'Reward'};
+    % Check if we have enough features
+    if length(key_feature_idx) < 3
+        fprintf('  Not enough features found, skipping...\n\n');
+        continue;
+    end
+
+    % Select units
+    if strcmp(sess_name, 'Aversive')
+        unit_mask = is_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        unit_mask = ~is_aversive;
     else
-        n_simple_plots = 1;
-        simple_plot_names = {'Combined'};
+        unit_mask = true(n_units, 1);
     end
 
-    for plot_idx = 1:n_simple_plots
-
-        if config.separate_by_session
-            fprintf('\n  Creating simplified heatmap for %s sessions...\n', simple_plot_names{plot_idx});
-
-            % Select units for this session type
-            if strcmp(simple_plot_names{plot_idx}, 'Aversive')
-                sess_units = is_aversive;
-            else
-                sess_units = ~is_aversive;
-            end
-
-            simple_matrix_plot = simplified_matrix_norm(sess_units, :);
-            simple_is_aversive = is_aversive(sess_units);
-            simple_session_ids = session_ids(sess_units);
-        else
-            simple_matrix_plot = simplified_matrix_norm;
-            simple_is_aversive = is_aversive;
-            simple_session_ids = session_ids;
-        end
-
-        % Perform hierarchical clustering on simplified matrix
-        valid_units = sum(~isnan(simple_matrix_plot), 2) > size(simple_matrix_plot, 2) * 0.5;
-
-        if sum(valid_units) >= 3
-            simple_matrix_clean = simple_matrix_plot(valid_units, :);
-
-            % Remove NaN columns
-            valid_features = sum(~isnan(simple_matrix_clean), 1) > size(simple_matrix_clean, 1) * 0.3;
-            simple_matrix_clean = simple_matrix_clean(:, valid_features);
-            simple_names_used = simplified_names_found(valid_features);
-
-            % Replace remaining NaNs with column mean
-            for f = 1:size(simple_matrix_clean, 2)
-                col = simple_matrix_clean(:, f);
-                if ~all(isnan(col))
-                    col(isnan(col)) = nanmean(col);
-                    simple_matrix_clean(:, f) = col;
-                end
-            end
-
-            % Compute distance and linkage
-            distances = pdist(simple_matrix_clean, 'euclidean');
-            simple_linkage_tree = linkage(distances, 'ward');
-
-            % Get dendrogram order
-            figure;
-            [~, ~, sort_idx_clean] = dendrogram(simple_linkage_tree, 0);
-
-            % Map back to original indices
-            valid_idx = find(valid_units);
-            simple_sort_idx = valid_idx(sort_idx_clean);
-
-            % Reorder matrix
-            simple_matrix_sorted = simple_matrix_plot(simple_sort_idx, valid_features);
-            simple_is_aversive_sorted = simple_is_aversive(simple_sort_idx);
-
-            % Create figure
-            fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
-                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
-
-            % Left: Dendrogram
-            subplot('Position', [0.05 0.15 0.10 0.75]);
-            dendrogram(simple_linkage_tree, 0, 'Orientation', 'left');
-            set(gca, 'YDir', 'reverse');
-            set(gca, 'XTickLabel', []);
-            ylabel('Units');
-            title('Unit Clustering');
-
-            % Center: Heatmap
-            subplot('Position', [0.17 0.15 0.65 0.75]);
-            imagesc(simple_matrix_sorted);
-            axis tight;
-            colormap(bluewhitered(256));
-            caxis([-3 3]);
-
-            % Colorbar
-            cb = colorbar;
-            cb.Position = [0.84 0.15 0.02 0.75];
-            ylabel(cb, 'Z-score', 'FontSize', 11);
-
-            % Labels
-            xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
-
-            % X-axis: Feature names
-            set(gca, 'XTick', 1:length(simple_names_used));
-            set(gca, 'XTickLabel', simple_names_used);
-            set(gca, 'XTickLabelRotation', 45);
-            set(gca, 'FontSize', 11);
-
-            % Y-axis: Unit indices
-            set(gca, 'YTick', []);
-
-            % Add session type color bar on LEFT
-            subplot('Position', [0.15 0.15 0.01 0.75]);
-            session_type_colors = zeros(length(simple_sort_idx), 1, 3);
-            for i = 1:length(simple_sort_idx)
-                if simple_is_aversive_sorted(i)
-                    session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
-                else
-                    session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
-                end
-            end
-            image(session_type_colors);
-            set(gca, 'XTick', [], 'YTick', []);
-            xlabel('Session', 'FontSize', 9, 'Rotation', 0);
-
-            % Add title
-            if config.separate_by_session
-                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
-                    simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
-            else
-                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
-                    size(simple_matrix_sorted, 1));
-            end
-            annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
-                'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
-                'HorizontalAlignment', 'center');
-
-            fprintf('  ✓ Simplified heatmap created\n');
-
-            % --- CLUSTER THRESHOLDING AND SESSION ID COMPOSITION ANALYSIS ---
-            fprintf('  Performing cluster thresholding...\n');
-
-            % Determine number of clusters using distance threshold
-            % Adjust config.simplified_cluster_threshold to get different number of clusters
-            % Lower threshold = more clusters, Higher threshold = fewer clusters
-            cluster_threshold = config.simplified_cluster_threshold;
-            cluster_assignments_clean = cluster(simple_linkage_tree, 'cutoff', cluster_threshold, 'criterion', 'distance');
-
-            % Option 2: Manual - specify number of clusters (uncomment to use)
-            % n_clusters = 4;
-            % cluster_assignments_clean = cluster(simple_linkage_tree, 'maxclust', n_clusters);
-
-            % Map cluster assignments back to all units
-            cluster_assignments = nan(size(simple_matrix_plot, 1), 1);
-            cluster_assignments(valid_idx) = cluster_assignments_clean;
-
-            n_clusters = max(cluster_assignments_clean);
-            fprintf('    Found %d clusters\n', n_clusters);
-
-            % Sort units by cluster ID for clean visualization
-            [cluster_assignments_sorted, cluster_sort_idx] = sort(cluster_assignments, 'ascend', 'MissingPlacement', 'last');
-
-            % Remove NaN entries (units that weren't clustered)
-            valid_cluster_idx = ~isnan(cluster_assignments_sorted);
-            cluster_sort_idx = cluster_sort_idx(valid_cluster_idx);
-            cluster_assignments_sorted = cluster_assignments_sorted(valid_cluster_idx);
-
-            % Reorder the matrix and session IDs by cluster
-            simple_matrix_sorted_by_cluster = simple_matrix_plot(cluster_sort_idx, :);
-            simple_session_ids_sorted = simple_session_ids(cluster_sort_idx);
-
-            % Get unique session IDs
-            simple_session_ids = [simple_session_ids{:}];
-            unique_sessions = unique(simple_session_ids);
-            n_sessions = length(unique_sessions);
-            fprintf('    Analyzing %d unique sessions\n', n_sessions);
-
-            % Analyze session ID composition of each cluster
-            cluster_stats = struct();
-            session_cluster_matrix = zeros(n_sessions, n_clusters);  % rows=sessions, cols=clusters
-
-            for c = 1:n_clusters
-                units_in_cluster = find(cluster_assignments_sorted == c);
-                n_units_in_cluster = length(units_in_cluster);
-                session_ids_in_cluster = simple_session_ids_sorted(units_in_cluster);
-                session_ids_in_cluster = [session_ids_in_cluster{:}];
-
-                cluster_stats(c).cluster_id = c;
-                cluster_stats(c).n_total = n_units_in_cluster;
-                cluster_stats(c).session_composition = struct();
-
-                fprintf('    Cluster %d: %d units\n', c, n_units_in_cluster);
-
-                % Count units from each session
-                for s = 1:n_sessions
-                    sess_id = unique_sessions(s);
-                    n_from_session = sum(ismember(session_ids_in_cluster, sess_id));
-                    session_cluster_matrix(s, c) = n_from_session;
-
-                    if n_from_session > 0
-                        cluster_stats(c).session_composition(s).session_id = sess_id;
-                        cluster_stats(c).session_composition(s).n_units = n_from_session;
-                        cluster_stats(c).session_composition(s).pct = 100 * n_from_session / n_units_in_cluster;
-                        fprintf('      %d: %d units (%.1f%%)\n', sess_id, n_from_session, ...
-                            100 * n_from_session / n_units_in_cluster);
-                    end
-                end
-            end
-
-
-            % --- CREATE SESSION ID COMPOSITION FIGURE ---
-            % Create figure first to avoid overlap issues
-            fig_composition = figure('Position', [200 + (plot_idx-1)*100 200 + (plot_idx-1)*50 1600 800], ...
-                                    'Name', sprintf('Cluster Session ID Composition - %s', simple_plot_names{plot_idx}));
-
-            % --- LEFT: Colored Dendrogram sorted by Cluster ID ---
-            subplot('Position', [0.05 0.12 0.18 0.75]);            
-            
-            allUnitID = 1:length(cluster_assignments);
-            allUnitID(simple_sort_idx) = allUnitID;
-            [~,cluster_double_sort] = sortrows([cluster_assignments(:),allUnitID(:)],[1,2]);
-            % Draw dendrogram with cluster coloring and reordering
-            H = dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', ...
-                          'ColorThreshold', cluster_threshold, ...
-                          'Reorder', cluster_double_sort);
-
-            set(gca, 'YDir', 'normal');  % Cluster 1 at bottom
-            set(gca, 'XTickLabel', []);
-            ylabel('Units (sorted by Cluster ID)', 'FontSize', 11, 'FontWeight', 'bold');
-            title('Dendrogram', 'FontSize', 12, 'FontWeight', 'bold');
-            set(gca, 'FontSize', 10);
-
-            % Add cluster threshold line
-            hold on;
-            ylims = ylim;
-            plot([cluster_threshold, cluster_threshold], ylims, 'r--', 'LineWidth', 2);
-            hold off;
-            box on;
-
-            % --- CENTER: Heatmap showing session contribution to each cluster ---
-            subplot('Position', [0.28 0.12 0.35 0.75]);
-            imagesc(session_cluster_matrix');  % Transpose so clusters are on Y, sessions on X
-
-            % Use a better colormap for counts
-            colormap(gca, hot);
-            cb = colorbar('Position', [0.64 0.12 0.015 0.75]);
-            ylabel(cb, 'Unit Count', 'FontSize', 10);
-
-            % Labels
-            xlabel('Session ID', 'FontSize', 11, 'FontWeight', 'bold');
-            ylabel('Cluster ID', 'FontSize', 11, 'FontWeight', 'bold');
-            title('Units per Session per Cluster', 'FontSize', 12, 'FontWeight', 'bold');
-
-            % X-axis: Session IDs
-            set(gca, 'XTick', 1:n_sessions);
-            set(gca, 'XTickLabel', unique_sessions);
-            set(gca, 'XTickLabelRotation', 45);
-
-            % Y-axis: Cluster IDs (reversed so Cluster 1 is at bottom)
-            set(gca, 'YTick', 1:n_clusters);
-            set(gca, 'YTickLabel', 1:n_clusters);
-            set(gca, 'YDir', 'normal');  % Normal direction: Cluster 1 at bottom
-
-            set(gca, 'FontSize', 10);
-            axis tight;
-
-            % Add text annotations showing counts
-            for s = 1:n_sessions
-                for c = 1:n_clusters
-                    count = session_cluster_matrix(s, c);
-                    if count > 0
-                        % Use white or black text depending on background intensity
-                        if count > max(session_cluster_matrix(:)) * 0.5
-                            text_color = 'white';
-                        else
-                            text_color = 'black';
-                        end
-                        text(s, c, num2str(count), 'HorizontalAlignment', 'center', ...
-                            'Color', text_color, 'FontSize', 9, 'FontWeight', 'bold');
-                    end
-                end
-            end
-
-            % --- RIGHT: Bar chart showing total units per session ---
-            subplot('Position', [0.70 0.12 0.25 0.75]);
-            units_per_session = sum(session_cluster_matrix, 2);
-
-            % Color bars by session type (if available)
-            bar_colors = zeros(n_sessions, 3);
-            for s = 1:n_sessions
-                % Find first unit from this session to get its type
-                sess_id = unique_sessions(s);
-                unit_idx = find(ismember(simple_session_ids, sess_id), 1);
-                if ~isempty(unit_idx) && simple_is_aversive(unit_idx)
-                    bar_colors(s, :) = [0.8 0.2 0.2];  % Red for aversive
-                else
-                    bar_colors(s, :) = [0.2 0.2 0.8];  % Blue for reward
-                end
-            end
-
-            bar_handle = bar(1:n_sessions, units_per_session, 'FaceColor', 'flat');
-            bar_handle.CData = bar_colors;
-
-            xlabel('Session ID', 'FontSize', 11, 'FontWeight', 'bold');
-            ylabel('Total Units', 'FontSize', 11, 'FontWeight', 'bold');
-            title('Units per Session', 'FontSize', 12, 'FontWeight', 'bold');
-
-            set(gca, 'XTick', 1:n_sessions);
-            set(gca, 'XTickLabel', unique_sessions);
-            set(gca, 'XTickLabelRotation', 45);
-            set(gca, 'FontSize', 10);
-            grid on;
-
-            % Add legend for session types
-            hold on;
-            h_aversive = plot(nan, nan, 's', 'MarkerSize', 10, 'MarkerFaceColor', [0.8 0.2 0.2], 'MarkerEdgeColor', 'none');
-            h_reward = plot(nan, nan, 's', 'MarkerSize', 10, 'MarkerFaceColor', [0.2 0.2 0.8], 'MarkerEdgeColor', 'none');
-            legend([h_aversive, h_reward], {'Aversive', 'Reward'}, 'Location', 'best', 'FontSize', 9);
-            hold off;
-
-            % Add overall title
-            if config.separate_by_session
-                sgtitle(sprintf('Session ID Composition - %s Sessions (%d clusters, %d sessions, threshold=%.2f)', ...
-                    simple_plot_names{plot_idx}, n_clusters, n_sessions, cluster_threshold), ...
-                    'FontSize', 14, 'FontWeight', 'bold');
-            else
-                sgtitle(sprintf('Session ID Composition - All Sessions (%d clusters, %d sessions, threshold=%.2f)', ...
-                    n_clusters, n_sessions, cluster_threshold), ...
-                    'FontSize', 14, 'FontWeight', 'bold');
-            end
-
-            % Reorder matrix
-            simple_matrix_sorted = simple_matrix_plot(cluster_double_sort, valid_features);
-            simple_is_aversive_sorted = simple_is_aversive(cluster_double_sort);
-
-            % Create figure
-            fig_simple = figure('Position', [100 + (plot_idx-1)*100 100 + (plot_idx-1)*50 1600 1000], ...
-                               'Name', sprintf('Simplified 6-Feature Clustering - %s', simple_plot_names{plot_idx}));
-
-            % Left: Dendrogram
-            subplot('Position', [0.05 0.15 0.10 0.75]);
-            dendrogram(simple_linkage_tree, 0, 'Orientation', 'left', ...
-                          'ColorThreshold', cluster_threshold, ...
-                          'Reorder', cluster_double_sort);
-            set(gca, 'YDir', 'reverse');
-            set(gca, 'XTickLabel', []);
-            ylabel('Units');
-            title('Unit Clustering');
-
-            % Center: Heatmap
-            subplot('Position', [0.17 0.15 0.65 0.75]);
-            imagesc(simple_matrix_sorted);
-            axis tight;
-            colormap(bluewhitered(256));
-            caxis([-3 3]);
-
-            % Colorbar
-            cb = colorbar;
-            cb.Position = [0.84 0.15 0.02 0.75];
-            ylabel(cb, 'Z-score', 'FontSize', 11);
-
-            % Labels
-            xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
-            ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
-
-            % X-axis: Feature names
-            set(gca, 'XTick', 1:length(simple_names_used));
-            set(gca, 'XTickLabel', simple_names_used);
-            set(gca, 'XTickLabelRotation', 45);
-            set(gca, 'FontSize', 11);
-
-            % Y-axis: Unit indices
-            set(gca, 'YTick', []);
-
-            % Add session type color bar on LEFT
-            subplot('Position', [0.15 0.15 0.01 0.75]);
-            session_type_colors = zeros(length(simple_sort_idx), 1, 3);
-            for i = 1:length(simple_sort_idx)
-                if simple_is_aversive_sorted(i)
-                    session_type_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
-                else
-                    session_type_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
-                end
-            end
-            image(session_type_colors);
-            set(gca, 'XTick', [], 'YTick', []);
-            xlabel('Session', 'FontSize', 9, 'Rotation', 0);
-
-            % Add title
-            if config.separate_by_session
-                title_str = sprintf('Simplified 6-Feature Clustering - %s Sessions (%d units)', ...
-                    simple_plot_names{plot_idx}, size(simple_matrix_sorted, 1));
-            else
-                title_str = sprintf('Simplified 6-Feature Clustering (%d units)', ...
-                    size(simple_matrix_sorted, 1));
-            end
-            annotation('textbox', [0.17 0.92 0.65 0.05], 'String', title_str, ...
-                'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
-                'HorizontalAlignment', 'center');
-
-            fprintf('  ✓ Sorted heatmap created\n');
-
-            fprintf('  ✓ Session ID composition figure created\n');
-
-            % ========== SAVE ALL RESULTS FOR LATER USE ==========
-            fprintf('  Saving clustering results for later analysis...\n');
-
-            simplified_clustering_results = struct();
-
-            % 1. CLUSTERING DATA (for both figures)
-            simplified_clustering_results.clustering = struct();
-            simplified_clustering_results.clustering.linkage_tree = simple_linkage_tree;
-            simplified_clustering_results.clustering.cluster_threshold = cluster_threshold;
-            simplified_clustering_results.clustering.cluster_assignments = cluster_assignments;
-            simplified_clustering_results.clustering.n_clusters = n_clusters;
-            simplified_clustering_results.clustering.cluster_double_sort = cluster_double_sort;
-            simplified_clustering_results.clustering.simple_sort_idx = simple_sort_idx;
-            simplified_clustering_results.clustering.valid_units = valid_units;
-            simplified_clustering_results.clustering.distances = distances;
-
-            % 2. FEATURE MATRIX DATA (for heatmap figure)
-            simplified_clustering_results.features = struct();
-            simplified_clustering_results.features.matrix = simple_matrix_plot;
-            simplified_clustering_results.features.matrix_sorted = simple_matrix_sorted;
-            simplified_clustering_results.features.names = simple_names_used;
-            simplified_clustering_results.features.valid_features = valid_features;
-            simplified_clustering_results.features.simplified_indices = simplified_indices;
-
-            % 3. UNIT METADATA (for both figures)
-            simplified_clustering_results.units = [];
-            for u = 1:length(cluster_assignments)
-                if ~isnan(cluster_assignments(u))
-                    unit_info = struct();
-                    unit_info.global_unit_id = u;
-                    unit_info.session_id = simple_session_ids(u);
-                    unit_info.is_aversive = simple_is_aversive(u);
-                    unit_info.cluster_id = cluster_assignments(u);
-                    unit_info.features = simple_matrix_plot(u, valid_features);
-                    unit_info.session_filename = coherence_features(u).session_filename;
-                    unit_info.unit_id = coherence_features(u).unit_id;
-                    unit_info.session_type = coherence_features(u).session_type;
-                    simplified_clustering_results.units = [simplified_clustering_results.units; unit_info];
-                end
-            end
-
-            % 4. SESSION COMPOSITION DATA (for session composition figure)
-            simplified_clustering_results.session_composition = struct();
-            simplified_clustering_results.session_composition.session_cluster_matrix = session_cluster_matrix;
-            simplified_clustering_results.session_composition.unique_sessions = unique_sessions;
-            simplified_clustering_results.session_composition.n_sessions = n_sessions;
-            simplified_clustering_results.session_composition.cluster_stats = cluster_stats;
-            simplified_clustering_results.session_composition.units_per_session = sum(session_cluster_matrix, 2);
-
-            % 5. VISUALIZATION DATA (for both figures)
-            simplified_clustering_results.visualization = struct();
-            simplified_clustering_results.visualization.is_aversive_sorted = simple_is_aversive_sorted;
-            simplified_clustering_results.visualization.simple_session_ids = simple_session_ids;
-            simplified_clustering_results.visualization.simple_is_aversive = simple_is_aversive;
-
-            % 6. CONFIGURATION & METADATA
-            simplified_clustering_results.metadata = struct();
-            simplified_clustering_results.metadata.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
-            simplified_clustering_results.metadata.feature_names = simple_names_used;
-            simplified_clustering_results.metadata.n_features = length(simple_names_used);
-            simplified_clustering_results.metadata.config = config;
-            if config.separate_by_session
-                simplified_clustering_results.metadata.session_type = simple_plot_names{plot_idx};
-            else
-                simplified_clustering_results.metadata.session_type = 'combined';
-            end
-
-            % 7. RAW DATA PATHS (for interaction analysis later)
-            simplified_clustering_results.data_paths = struct();
-            simplified_clustering_results.data_paths.feature_file = 'unit_features_comprehensive.mat';
-            simplified_clustering_results.data_paths.spike_data_folder = '/Volumes/ExpansionBackup/Data/Struct_spike';
-
-            % 8. CLUSTER-TO-UNIT LOOKUP (for interaction analysis)
-            simplified_clustering_results.cluster_lookup = [];
-            for c = 1:n_clusters
-                cluster_info = struct();
-                unit_indices = find(cluster_assignments == c);
-                cluster_info.cluster_id = c;
-                cluster_info.unit_indices = unit_indices;
-                cluster_info.n_units = length(unit_indices);
-
-                % Store session and unit IDs for each unit in this cluster
-                cluster_unit_details = [];
-                for i = 1:length(unit_indices)
-                    u_idx = unit_indices(i);
-                    unit_detail = struct();
-                    unit_detail.global_unit_id = u_idx;
-                    unit_detail.session_id = simple_session_ids(u_idx);
-                    unit_detail.session_filename = coherence_features(u_idx).session_filename;
-                    unit_detail.unit_id = coherence_features(u_idx).unit_id;
-                    unit_detail.session_type = coherence_features(u_idx).session_type;
-                    cluster_unit_details = [cluster_unit_details; unit_detail];
-                end
-                cluster_info.unit_details = cluster_unit_details;
-
-                % Add cluster centroid (mean feature values)
-                cluster_features = simple_matrix_plot(unit_indices, valid_features);
-                cluster_info.centroid = mean(cluster_features, 1, 'omitnan');
-
-                simplified_clustering_results.cluster_lookup = [simplified_clustering_results.cluster_lookup; cluster_info];
-            end
-
-            % Save to file
-            timestamp_file = datestr(now, 'yyyy-mm-dd_HHMMSS');
-            if config.separate_by_session
-                save_filename = sprintf('simplified_clustering_%s_%s.mat', ...
-                    simple_plot_names{plot_idx}, timestamp_file);
-            else
-                save_filename = sprintf('simplified_clustering_combined_%s.mat', timestamp_file);
-            end
-
-            save(save_filename, 'simplified_clustering_results', '-v7.3');
-            fprintf('  ✓ Clustering results saved to: %s\n', save_filename);
-            fprintf('     - Contains all data to regenerate figures and analyze cluster interactions\n');
-
-        else
-            fprintf('  WARNING: Not enough valid units (%d) for simplified clustering\n', sum(valid_units));
-        end
+    % Extract simplified feature matrix
+    simplified_matrix = feature_matrix(:, key_feature_idx);
+    simplified_names = key_feature_names_found;
+
+    sess_simple_matrix = simplified_matrix(unit_mask, :);
+    sess_session_ids = session_ids(unit_mask);
+    sess_is_aversive = is_aversive(unit_mask);
+
+    % Select session-specific cluster threshold
+    if strcmp(sess_name, 'Aversive')
+        cluster_threshold = config.cluster_threshold_aversive;
+    elseif strcmp(sess_name, 'Reward')
+        cluster_threshold = config.cluster_threshold_reward;
+    else
+        cluster_threshold = config.cluster_threshold_aversive;
     end
 
-    fprintf('\n✓ Simplified clustering complete\n\n');
+    % Perform clustering
+    [unit_sort_idx, linkage_tree, cluster_assignments] = perform_clustering(...
+        sess_simple_matrix, cluster_threshold);
+
+    n_clusters = max(cluster_assignments(~isnan(cluster_assignments)));
+    fprintf('  Clusters: %d\n', n_clusters);
+
+    % Create simplified heatmap
+    create_simplified_heatmap(sess_simple_matrix, simplified_names, ...
+        unit_sort_idx, linkage_tree, cluster_assignments, sess_is_aversive, ...
+        sess_session_ids, sess_name, config, cluster_threshold);
+
+    fprintf('✓ Simplified %s complete\n\n', sess_name);
 end
 
-%% ========================================================================
-%  SECTION 8: SAVE RESULTS
-%% ========================================================================
-
-% fprintf('Saving results...\n');
-%
-% % Save figure
-% saveas(fig, sprintf('Unit_Features_Comprehensive_Heatmap_%s.png', config.sort_method));
-% fprintf('✓ Saved figure\n');
-%
-% % Save feature matrix and metadata
-% save('unit_features_matrix.mat', 'feature_matrix', 'all_features', 'feature_names', ...
-%      'feature_categories', 'sort_idx', 'session_types', 'is_aversive', '-v7.3');
-% fprintf('✓ Saved feature matrix to: unit_features_matrix.mat\n');
+fprintf('✓ Simplified clustering complete\n\n');
 
 %% ========================================================================
-%  SECTION 9: SUMMARY STATISTICS
+%  SECTION 9: SUMMARY
 %% ========================================================================
-
-fprintf('\n=== FEATURE MATRIX SUMMARY ===\n');
-fprintf('Dimensions: %d units × %d features\n', size(feature_matrix, 1), size(feature_matrix, 2));
-fprintf('\nFeature breakdown:\n');
-
-for i = 1:length(unique_categories)
-    cat_name = unique_categories{i};
-    n_features = sum(strcmp(feature_categories, cat_name));
-    fprintf('  %s: %d features\n', cat_name, n_features);
-end
-
-fprintf('\nSession types:\n');
-fprintf('  Aversive: %d units (%.1f%%)\n', sum(is_aversive), 100*sum(is_aversive)/length(is_aversive));
-fprintf('  Reward: %d units (%.1f%%)\n', sum(~is_aversive), 100*sum(~is_aversive)/length(is_aversive));
-
-fprintf('\nData completeness:\n');
-fprintf('  Average %% non-NaN per unit: %.1f%%\n', ...
-    100 * mean(sum(~isnan(feature_matrix), 2) / size(feature_matrix, 2)));
 
 fprintf('\n========================================\n');
-fprintf('COMPREHENSIVE HEATMAP COMPLETE!\n');
+fprintf('CLUSTERING AND VISUALIZATION COMPLETE!\n');
 fprintf('========================================\n');
+fprintf('Total units analyzed: %d\n', n_units);
+fprintf('Total features: %d\n', length(feature_names));
+fprintf('Session types: %s\n', strjoin(session_types_to_analyze, ', '));
+fprintf('\nFiles saved:\n');
+fprintf('  - unit_cluster_assignments.mat (UniqueUnitID + ClusterID)\n');
+fprintf('\nFigures created:\n');
+fprintf('  - Comprehensive heatmaps with dendrograms + cluster IDs\n');
+fprintf('  - Cluster composition analysis\n');
+fprintf('  - Feature importance analysis (Univariate, RF, RFE)\n');
+fprintf('  - Simplified clustering with key features\n');
+fprintf('========================================\n');
+
 
 %% ========================================================================
 %  HELPER FUNCTIONS
 %% ========================================================================
 
-function [unit_sort_idx, feature_sort_idx, unit_linkage_tree, feature_linkage_tree] = ...
-    perform_sorting(feature_matrix, is_aversive, feature_names, config)
-% Helper function to perform clustering/sorting on a feature matrix
-%
-% Inputs:
-%   feature_matrix - Units × Features matrix
-%   is_aversive - Boolean array indicating aversive sessions
-%   feature_names - Cell array of feature names
-%   config - Configuration struct
-%
-% Outputs:
-%   unit_sort_idx - Sorting indices for units
-%   feature_sort_idx - Sorting indices for features
-%   unit_linkage_tree - Linkage tree for unit clustering (if applicable)
-%   feature_linkage_tree - Linkage tree for feature clustering (if applicable)
+function feature_categories = categorize_features(feature_names)
+% Categorize features based on their names
 
-    % Initialize
-    unit_sort_idx = 1:size(feature_matrix, 1);
-    feature_sort_idx = 1:size(feature_matrix, 2);
-    unit_linkage_tree = [];
-    feature_linkage_tree = [];
+    feature_categories = cell(size(feature_names));
 
-    % Minimum sample size for clustering
-    MIN_UNITS_FOR_CLUSTERING = 3;
-    MIN_FEATURES_FOR_CLUSTERING = 3;
+    for i = 1:length(feature_names)
+        name = feature_names{i};
 
-    % --- UNIT SORTING (only if clustering units or both) ---
-    if strcmp(config.cluster_dimension, 'units') || strcmp(config.cluster_dimension, 'both')
-        fprintf('    Clustering/sorting units...\n');
-
-        % Check if we have enough units for clustering
-        if size(feature_matrix, 1) < MIN_UNITS_FOR_CLUSTERING
-            fprintf('    WARNING: Only %d units available, skipping clustering (minimum: %d)\n', ...
-                size(feature_matrix, 1), MIN_UNITS_FOR_CLUSTERING);
-            fprintf('      Using original order\n');
+        if contains(name, 'PPC')
+            feature_categories{i} = 'PPC';
+        elseif contains(name, 'Coherence')
+            feature_categories{i} = 'Coherence';
+        elseif contains(name, 'PearsonR')
+            feature_categories{i} = 'PearsonR';
+        elseif contains(name, 'MutualInfo')
+            feature_categories{i} = 'MutualInfo';
+        elseif contains(name, 'PSTH')
+            feature_categories{i} = 'PSTH';
+        elseif ismember(name, {'FR', 'CV', 'ISI_FanoFactor', 'ISI_ACF_peak', 'ISI_ACF_lag'})
+            feature_categories{i} = 'Spike_Basic';
+        elseif contains(name, 'ACF') || contains(name, 'Fano')
+            feature_categories{i} = 'Spike_Temporal';
+        elseif contains(name, 'Burst')
+            feature_categories{i} = 'Spike_Burst';
+        elseif ismember(name, {'LV', 'CV2', 'ISI_Skewness', 'ISI_Kurtosis', 'ISI_Mode', 'RefracViolations'})
+            feature_categories{i} = 'Spike_Variability';
         else
-
-        switch config.sort_method
-            case 'session_type'
-                % Simple sort: Aversive first, then Reward
-                aversive_idx = find(is_aversive);
-                reward_idx = find(~is_aversive);
-                unit_sort_idx = [aversive_idx, reward_idx];
-
-            case 'hierarchical'
-                % Hierarchical clustering of units
-                % Remove units with too many NaNs
-                valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-
-                if sum(valid_units) < MIN_UNITS_FOR_CLUSTERING
-                    fprintf('    WARNING: Only %d valid units (minimum: %d), using original order\n', ...
-                        sum(valid_units), MIN_UNITS_FOR_CLUSTERING);
-                else
-                    feature_matrix_clean = feature_matrix(valid_units, :);
-
-                    % Remove features (columns) that are entirely or mostly NaN
-                    % This is critical for separate session analysis where session-specific features may be all NaN
-                    valid_features = sum(~isnan(feature_matrix_clean), 1) > size(feature_matrix_clean, 1) * 0.3;
-
-                    if sum(valid_features) < 2
-                        fprintf('    WARNING: Only %d valid features after removing NaN columns, using original order\n', sum(valid_features));
-                    else
-                        feature_matrix_clean = feature_matrix_clean(:, valid_features);
-
-                        % Replace remaining NaNs with column mean
-                        for f = 1:size(feature_matrix_clean, 2)
-                            col = feature_matrix_clean(:, f);
-                            if ~all(isnan(col))  % Extra safety check
-                                col(isnan(col)) = nanmean(col);
-                                feature_matrix_clean(:, f) = col;
-                            end
-                        end
-
-                        % Compute distance and linkage
-                        distances = pdist(feature_matrix_clean, 'euclidean');
-                        unit_linkage_tree = linkage(distances, 'ward');
-
-                        % Get dendrogram order
-                        [~, ~, sort_idx_clean] = dendrogram(unit_linkage_tree, 0);
-
-                        % Map back to original indices
-                        valid_idx = find(valid_units);
-                        unit_sort_idx = valid_idx(sort_idx_clean);
-                    end
-                end
-
-            case 'pca'
-                % Sort by first principal component
-                % Remove NaNs
-                valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
-
-                if sum(valid_units) < MIN_UNITS_FOR_CLUSTERING
-                    fprintf('    WARNING: Only %d valid units (minimum: %d), using original order\n', ...
-                        sum(valid_units), MIN_UNITS_FOR_CLUSTERING);
-                else
-                    feature_matrix_clean = feature_matrix(valid_units, :);
-
-                    % Remove features (columns) that are entirely or mostly NaN
-                    valid_features = sum(~isnan(feature_matrix_clean), 1) > size(feature_matrix_clean, 1) * 0.3;
-
-                    if sum(valid_features) < 2
-                        fprintf('    WARNING: Only %d valid features after removing NaN columns, using original order\n', sum(valid_features));
-                    else
-                        feature_matrix_clean = feature_matrix_clean(:, valid_features);
-
-                        % Replace remaining NaNs with column mean
-                        for f = 1:size(feature_matrix_clean, 2)
-                            col = feature_matrix_clean(:, f);
-                            if ~all(isnan(col))  % Extra safety check
-                                col(isnan(col)) = nanmean(col);
-                                feature_matrix_clean(:, f) = col;
-                            end
-                        end
-
-                        % PCA
-                        [~, score, ~] = pca(feature_matrix_clean);
-
-                        % Sort by PC1
-                        [~, sort_idx_clean] = sort(score(:, 1));
-
-                        % Map back to original indices
-                        valid_idx = find(valid_units);
-                        unit_sort_idx = valid_idx(sort_idx_clean);
-                    end
-                end
-
-            case 'feature'
-                % Sort by specific feature
-                feature_idx = find(strcmp(feature_names, config.feature_to_sort));
-                if isempty(feature_idx)
-                    fprintf('    WARNING: Feature %s not found, using default sort\n', config.feature_to_sort);
-                    [~, unit_sort_idx] = sortrows([is_aversive',feature_matrix], [0,3]+1 ,'descend', 'MissingPlacement', 'last');
-                else
-                    [~, unit_sort_idx] = sort(feature_matrix(:, feature_idx), 'descend', 'MissingPlacement', 'last');
-                end
-
-            otherwise
-                % Default: session type
-                aversive_idx = find(is_aversive);
-                reward_idx = find(~is_aversive);
-                unit_sort_idx = [aversive_idx, reward_idx];
-        end
-        fprintf('      ✓ Units sorted\n');
-        end
-    end
-
-    % --- FEATURE SORTING (only if clustering features or both) ---
-    if strcmp(config.cluster_dimension, 'features') || strcmp(config.cluster_dimension, 'both')
-        fprintf('    Clustering features...\n');
-
-        % Check if we have enough features for clustering
-        if size(feature_matrix, 2) < MIN_FEATURES_FOR_CLUSTERING
-            fprintf('    WARNING: Only %d features available, skipping feature clustering (minimum: %d)\n', ...
-                size(feature_matrix, 2), MIN_FEATURES_FOR_CLUSTERING);
-            fprintf('      Using original order\n');
-        else
-
-            % Hierarchical clustering of features
-            % Transpose the matrix (features as rows)
-            % Remove features with too many NaNs
-            valid_features = sum(~isnan(feature_matrix), 1) > size(feature_matrix, 1) * 0.5;
-
-            if sum(valid_features) < MIN_FEATURES_FOR_CLUSTERING
-                fprintf('    WARNING: Only %d valid features (minimum: %d), using original order\n', ...
-                    sum(valid_features), MIN_FEATURES_FOR_CLUSTERING);
-            else
-                feature_matrix_transposed = feature_matrix(:, valid_features)';
-
-                % Replace remaining NaNs with row mean
-                for u = 1:size(feature_matrix_transposed, 2)
-                    col = feature_matrix_transposed(:, u);
-                    col(isnan(col)) = nanmean(col);
-                    feature_matrix_transposed(:, u) = col;
-                end
-
-                % Compute distance and linkage
-                distances_features = pdist(feature_matrix_transposed, 'euclidean');
-                feature_linkage_tree = linkage(distances_features, 'ward');
-
-                % Get dendrogram order
-                [~, ~, feature_sort_idx_clean] = dendrogram(feature_linkage_tree, 0);
-
-                % Map back to original indices
-                valid_feat_idx = find(valid_features);
-                feature_sort_idx = valid_feat_idx(feature_sort_idx_clean);
-                fprintf('      ✓ Features sorted\n');
-            end
+            feature_categories{i} = 'Other';
         end
     end
 end
 
+function [unit_sort_idx, linkage_tree, cluster_assignments] = perform_clustering(feature_matrix, cluster_threshold)
+% Perform hierarchical clustering on feature matrix
+
+    n_units = size(feature_matrix, 1);
+
+    % Remove units with too many NaNs
+    valid_units = sum(~isnan(feature_matrix), 2) > size(feature_matrix, 2) * 0.5;
+
+    if sum(valid_units) < 3
+        fprintf('    WARNING: Not enough valid units, using original order\n');
+        unit_sort_idx = 1:n_units;
+        linkage_tree = [];
+        cluster_assignments = nan(n_units, 1);
+        return;
+    end
+
+    feature_matrix_clean = feature_matrix(valid_units, :);
+
+    % Remove features with too many NaNs
+    valid_features = sum(~isnan(feature_matrix_clean), 1) > size(feature_matrix_clean, 1) * 0.3;
+    feature_matrix_clean = feature_matrix_clean(:, valid_features);
+
+    % Replace remaining NaNs with column mean
+    for f = 1:size(feature_matrix_clean, 2)
+        col = feature_matrix_clean(:, f);
+        if ~all(isnan(col))
+            col(isnan(col)) = nanmean(col);
+            feature_matrix_clean(:, f) = col;
+        end
+    end
+
+    % Compute distance and linkage
+    distances = pdist(feature_matrix_clean, 'euclidean');
+    linkage_tree = linkage(distances, 'ward');
+
+    % Get dendrogram order
+    [~, ~, sort_idx_clean] = dendrogram(linkage_tree, 0);
+
+    % Cluster assignments
+    cluster_assignments_clean = cluster(linkage_tree, 'cutoff', cluster_threshold, 'criterion', 'distance');
+
+    % Map back to original indices
+    valid_idx = find(valid_units);
+    unit_sort_idx = valid_idx(sort_idx_clean);
+
+    cluster_assignments = nan(n_units, 1);
+    cluster_assignments(valid_idx) = cluster_assignments_clean;
+end
+
+function create_comprehensive_heatmap(feature_matrix, feature_names, feature_categories, ...
+    unit_sort_idx, linkage_tree, is_aversive, session_name, config, cluster_threshold)
+% Create comprehensive heatmap with dendrogram
+
+    % Reorder matrix
+    feature_matrix_sorted = feature_matrix(unit_sort_idx, :);
+    is_aversive_sorted = is_aversive(unit_sort_idx);
+
+    % Get cluster assignments for sorted units
+    if ~isempty(linkage_tree)
+        cluster_assignments = cluster(linkage_tree, 'cutoff', cluster_threshold, 'criterion', 'distance');
+        cluster_assignments_sorted = cluster_assignments(unit_sort_idx);
+        n_clusters = max(cluster_assignments);
+    else
+        cluster_assignments_sorted = ones(length(unit_sort_idx), 1);
+        n_clusters = 1;
+    end
+
+    % Create figure
+    fig = figure('Position', [50 50 2000 1200], ...
+        'Name', sprintf('%s Sessions - Comprehensive Unit Features', session_name));
+
+    % Subplot positions
+    dendro_width = 0.10;
+    heatmap_left = 0.05 + dendro_width + 0.02;
+    heatmap_width = 0.70;
+    heatmap_bottom = 0.15;
+    heatmap_height = 0.70;
+
+    % Draw dendrogram
+    if config.show_dendrogram && ~isempty(linkage_tree)
+        subplot('Position', [0.05 heatmap_bottom dendro_width heatmap_height]);
+        dendrogram(linkage_tree, 0, 'Orientation', 'left', ...
+            'ColorThreshold', cluster_threshold);
+        set(gca, 'YDir', 'reverse');
+        set(gca, 'XTickLabel', []);
+        ylabel('Units', 'FontSize', 11, 'FontWeight', 'bold');
+        title('Clustering', 'FontSize', 12);
+
+        % Add threshold line
+        hold on;
+        xlims = xlim;
+        plot([cluster_threshold, cluster_threshold], ylim, 'r--', 'LineWidth', 2);
+        hold off;
+    end
+
+    % Draw main heatmap
+    subplot('Position', [heatmap_left heatmap_bottom heatmap_width heatmap_height]);
+    imagesc(feature_matrix_sorted);
+    axis tight;
+
+    % Colormap
+    if strcmp(config.colormap_name, 'bluewhitered')
+        colormap(bluewhitered(256));
+        if config.normalize_features
+            caxis([-3 3]);
+        end
+    else
+        colormap(config.colormap_name);
+    end
+
+    % Colorbar
+    cb = colorbar;
+    cb.Position = [0.90 heatmap_bottom 0.02 heatmap_height];
+    if config.normalize_features
+        ylabel(cb, 'Z-score', 'FontSize', 11);
+    else
+        ylabel(cb, 'Feature Value', 'FontSize', 11);
+    end
+
+    % Labels
+    xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
+
+    % X-axis: Feature names
+    set(gca, 'XTick', 1:length(feature_names));
+    set(gca, 'XTickLabel', feature_names);
+    set(gca, 'XTickLabelRotation', 90);
+    set(gca, 'FontSize', 7);
+
+    % Y-axis
+    set(gca, 'YTick', []);
+
+    % Cluster ID color bar (left of heatmap)
+    subplot('Position', [heatmap_left-0.025 heatmap_bottom 0.01 heatmap_height]);
+    cluster_colormap = lines(n_clusters);  % Distinct colors for each cluster
+    cluster_colors = zeros(length(unit_sort_idx), 1, 3);
+    for i = 1:length(unit_sort_idx)
+        cluster_id = cluster_assignments_sorted(i);
+        cluster_colors(i, 1, :) = cluster_colormap(cluster_id, :);
+    end
+    image(cluster_colors);
+    set(gca, 'XTick', [], 'YTick', []);
+    ylabel('Cluster ID', 'FontSize', 9, 'FontWeight', 'bold', 'Rotation', 0, ...
+        'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle');
+
+    % Session type color bar
+    subplot('Position', [heatmap_left-0.012 heatmap_bottom 0.005 heatmap_height]);
+    session_colors = zeros(length(unit_sort_idx), 1, 3);
+    for i = 1:length(unit_sort_idx)
+        if is_aversive_sorted(i)
+            session_colors(i, 1, :) = [0.8 0.2 0.2];  % Red
+        else
+            session_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue
+        end
+    end
+    image(session_colors);
+    set(gca, 'XTick', [], 'YTick', []);
+
+    % Feature category color bar
+    subplot('Position', [heatmap_left 0.87 heatmap_width 0.01]);
+    unique_categories = unique(feature_categories, 'stable');
+    category_colors = lines(length(unique_categories));
+    feature_category_img = zeros(1, length(feature_names), 3);
+
+    for i = 1:length(feature_names)
+        cat_idx = find(strcmp(unique_categories, feature_categories{i}));
+        feature_category_img(1, i, :) = category_colors(cat_idx, :);
+    end
+
+    image(feature_category_img);
+    set(gca, 'XTick', [], 'YTick', []);
+
+    % Title
+    title_str = sprintf('%s Sessions: %d units × %d features | Threshold: %.1f', ...
+        session_name, size(feature_matrix_sorted, 1), size(feature_matrix_sorted, 2), ...
+        cluster_threshold);
+    annotation('textbox', [heatmap_left 0.92 heatmap_width 0.05], 'String', title_str, ...
+        'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center');
+
+    % Category legend
+    legend_str = 'Categories: ';
+    for i = 1:length(unique_categories)
+        legend_str = [legend_str, sprintf('%s | ', unique_categories{i})];
+    end
+    annotation('textbox', [0.05 0.08 0.90 0.03], 'String', legend_str, ...
+        'EdgeColor', 'none', 'FontSize', 9, 'HorizontalAlignment', 'center');
+
+    % Cluster ID legend with color patches
+    cluster_legend_y = 0.02;
+    patch_width = 0.015;
+    patch_height = 0.025;
+    text_offset = 0.02;
+
+    for c = 1:n_clusters
+        patch_x = 0.05 + (c-1) * 0.08;
+        % Draw color patch
+        annotation('rectangle', [patch_x cluster_legend_y patch_width patch_height], ...
+            'FaceColor', cluster_colormap(c, :), 'EdgeColor', 'k', 'LineWidth', 1);
+        % Add cluster ID text
+        annotation('textbox', [patch_x + text_offset cluster_legend_y patch_width*2 patch_height], ...
+            'String', sprintf('Cluster %d', c), 'EdgeColor', 'none', ...
+            'FontSize', 9, 'FontWeight', 'bold', 'VerticalAlignment', 'middle');
+    end
+
+    % Save figure
+    fig_filename = sprintf('Comprehensive_Heatmap_%s.png', session_name);
+    saveas(fig, fig_filename);
+    fprintf('  Saved: %s\n', fig_filename);
+end
+
+function analyze_cluster_composition(cluster_assignments, session_ids, session_name, linkage_tree, config, cluster_threshold)
+% Analyze and visualize cluster composition by session
+
+    valid_clusters = ~isnan(cluster_assignments);
+    cluster_assignments = cluster_assignments(valid_clusters);
+    session_ids = session_ids(valid_clusters);
+
+    n_clusters = max(cluster_assignments);
+    unique_sessions = unique(session_ids);
+    n_sessions = length(unique_sessions);
+
+    % Build session × cluster matrix
+    session_cluster_matrix = zeros(n_sessions, n_clusters);
+
+    for s = 1:n_sessions
+        for c = 1:n_clusters
+            session_mask = ismember(session_ids,unique_sessions(s));
+            cluster_mask = cluster_assignments == c;
+            session_cluster_matrix(s, c) = sum(session_mask & cluster_mask);
+        end
+    end
+
+    % Create figure
+    fig = figure('Position', [100 100 1600 800], ...
+        'Name', sprintf('%s - Cluster Composition', session_name));
+
+    % Cluster color bar (left of heatmap)
+    subplot('Position', [0.12 0.15 0.015 0.70]);
+    cluster_colormap = lines(n_clusters);  % Same colors as comprehensive heatmap
+    cluster_img = zeros(n_clusters, 1, 3);
+    for c = 1:n_clusters
+        cluster_img(c, 1, :) = cluster_colormap(c, :);
+    end
+    image(cluster_img);
+    set(gca, 'XTick', [], 'YTick', 1:n_clusters);
+    set(gca, 'YDir', 'normal');
+    ylabel('Cluster ID', 'FontSize', 10, 'FontWeight', 'bold');
+
+    % Heatmap
+    subplot('Position', [0.15 0.15 0.60 0.70]);
+    imagesc(session_cluster_matrix');
+    colormap(hot);
+    cb = colorbar;
+    ylabel(cb, 'Unit Count', 'FontSize', 10);
+
+    xlabel('Session ID', 'FontSize', 11, 'FontWeight', 'bold');
+    title('Units per Session per Cluster', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'XTick', 1:n_sessions);
+    set(gca, 'XTickLabel', cellstr(string(unique_sessions)));
+    set(gca, 'YTick', 1:n_clusters);
+    set(gca, 'YDir', 'normal');
+    axis tight;
+
+    % Add count annotations
+    for s = 1:n_sessions
+        for c = 1:n_clusters
+            count = session_cluster_matrix(s, c);
+            if count > 0
+                if count > max(session_cluster_matrix(:)) * 0.5
+                    text_color = 'white';
+                else
+                    text_color = 'black';
+                end
+                text(s, c, num2str(count), 'HorizontalAlignment', 'center', ...
+                    'Color', text_color, 'FontSize', 9, 'FontWeight', 'bold');
+            end
+        end
+    end
+
+    % Bar chart
+    subplot('Position', [0.80 0.15 0.15 0.70]);
+    units_per_session = sum(session_cluster_matrix, 2);
+    barh(1:n_sessions, units_per_session, 'FaceColor', [0.5 0.5 0.8]);
+    xlabel('Total Units', 'FontSize', 11);
+    ylabel('Session ID', 'FontSize', 11);
+    set(gca, 'YTick', 1:n_sessions);
+    set(gca, 'YTickLabel', unique_sessions);
+    set(gca, 'YDir', 'normal');
+    grid on;
+
+    % Overall title
+    sgtitle(sprintf('%s: %d clusters, %d sessions', session_name, n_clusters, n_sessions), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+
+    % Save figure
+    fig_filename = sprintf('Cluster_Composition_%s.png', session_name);
+    saveas(fig, fig_filename);
+    fprintf('  Saved: %s\n', fig_filename);
+end
+
+function create_pca_heatmap(pca_features, unit_sort_idx, linkage_tree, ...
+    cluster_assignments, is_aversive, session_name, explained_variance, ...
+    config, cluster_threshold)
+% Create heatmap visualization for PCA-based clustering
+%
+% Inputs:
+%   pca_features: [n_units × 5] matrix of PC scores
+%   unit_sort_idx: Unit indices after clustering
+%   linkage_tree: Hierarchical linkage tree
+%   cluster_assignments: Cluster IDs for each unit
+%   is_aversive: Boolean array indicating session type
+%   session_name: Name of session type
+%   explained_variance: [5 × 1] variance explained by each PC
+%   config: Configuration structure
+%   cluster_threshold: Distance threshold for clustering
+
+    % Reorder features by clustering
+    pca_features_sorted = pca_features(unit_sort_idx, :);
+    is_aversive_sorted = is_aversive(unit_sort_idx);
+    cluster_assignments_sorted = cluster_assignments(unit_sort_idx);
+
+    % Get number of clusters
+    n_clusters = max(cluster_assignments(~isnan(cluster_assignments)));
+    if isnan(n_clusters)
+        n_clusters = 0;
+    end
+
+    % Create figure
+    fig = figure('Position', [100 100 1200 900], ...
+        'Name', sprintf('%s - PCA Clustering', session_name));
+
+    % Dendrogram
+    if ~isempty(linkage_tree)
+        subplot('Position', [0.05 0.15 0.10 0.75]);
+        dendrogram(linkage_tree, 0, 'Orientation', 'left', ...
+            'ColorThreshold', cluster_threshold);
+        set(gca, 'YDir', 'reverse');
+        set(gca, 'XTickLabel', []);
+        ylabel('Units', 'FontSize', 11);
+        title('Clustering', 'FontSize', 12);
+        heatmap_left = 0.18;
+    else
+        heatmap_left = 0.08;
+    end
+
+    % Cluster ID color bar
+    subplot('Position', [heatmap_left - 0.02 0.15 0.015 0.75]);
+    cluster_colormap = lines(n_clusters);
+    cluster_colors = zeros(length(unit_sort_idx), 1, 3);
+    for i = 1:length(unit_sort_idx)
+        cluster_id = cluster_assignments_sorted(i);
+        if ~isnan(cluster_id)
+            cluster_colors(i, 1, :) = cluster_colormap(cluster_id, :);
+        else
+            cluster_colors(i, 1, :) = [0.5 0.5 0.5];  % Gray for unassigned
+        end
+    end
+    image(cluster_colors);
+    set(gca, 'XTick', [], 'YTick', []);
+    ylabel('Cluster', 'FontSize', 10, 'FontWeight', 'bold', 'Rotation', 0, ...
+        'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle');
+
+    % Heatmap
+    heatmap_width = 0.50;
+    subplot('Position', [heatmap_left 0.15 heatmap_width 0.75]);
+    imagesc(pca_features_sorted);
+    colormap(gca, bluewhitered(256));
+
+    % Set color limits based on data range
+    data_range = prctile(pca_features_sorted(:), [1 99]);
+    clim_val = max(abs(data_range));
+    caxis([-clim_val clim_val]);
+    axis tight;
+
+    cb = colorbar;
+    cb.Position = [heatmap_left + heatmap_width + 0.02 0.15 0.02 0.75];
+    ylabel(cb, 'PC Score', 'FontSize', 11);
+
+    ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
+    xlabel('Principal Components', 'FontSize', 12, 'FontWeight', 'bold');
+
+    % Create PC labels with variance explained
+    pc_labels = cell(5, 1);
+    for i = 1:5
+        pc_labels{i} = sprintf('PC%d (%.1f%%)', i, explained_variance(i));
+    end
+    set(gca, 'XTick', 1:5);
+    set(gca, 'XTickLabel', pc_labels);
+    set(gca, 'YTick', []);
+    set(gca, 'FontSize', 10);
+
+    % Session color bar
+    subplot('Position', [heatmap_left + heatmap_width + 0.06 0.15 0.01 0.75]);
+    session_colors = zeros(length(unit_sort_idx), 1, 3);
+    for i = 1:length(unit_sort_idx)
+        if is_aversive_sorted(i)
+            session_colors(i, 1, :) = [0.8 0.2 0.2];  % Red for aversive
+        else
+            session_colors(i, 1, :) = [0.2 0.2 0.8];  % Blue for reward
+        end
+    end
+    image(session_colors);
+    set(gca, 'XTick', [], 'YTick', []);
+    ylabel('Session', 'FontSize', 10, 'FontWeight', 'bold', 'Rotation', 0, ...
+        'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle');
+
+    % Legend
+    subplot('Position', [heatmap_left + heatmap_width + 0.10 0.15 0.20 0.75]);
+    axis off;
+
+    % Session type legend
+    text(0.1, 0.95, 'Session Type:', 'FontSize', 11, 'FontWeight', 'bold');
+    rectangle('Position', [0.1 0.90 0.05 0.03], 'FaceColor', [0.8 0.2 0.2], 'EdgeColor', 'k');
+    text(0.18, 0.915, 'Aversive', 'FontSize', 10);
+    rectangle('Position', [0.1 0.86 0.05 0.03], 'FaceColor', [0.2 0.2 0.8], 'EdgeColor', 'k');
+    text(0.18, 0.875, 'Reward', 'FontSize', 10);
+
+    % Cluster legend
+    text(0.1, 0.78, sprintf('Clusters (n=%d):', n_clusters), 'FontSize', 11, 'FontWeight', 'bold');
+    y_pos = 0.73;
+    for c = 1:min(n_clusters, 20)  % Limit to 20 clusters for display
+        rectangle('Position', [0.1 y_pos 0.05 0.03], ...
+            'FaceColor', cluster_colormap(c, :), 'EdgeColor', 'k');
+        n_units_in_cluster = sum(cluster_assignments == c);
+        text(0.18, y_pos + 0.015, sprintf('Cluster %d (n=%d)', c, n_units_in_cluster), ...
+            'FontSize', 9);
+        y_pos = y_pos - 0.04;
+        if y_pos < 0.15
+            break;
+        end
+    end
+
+    % Variance summary
+    text(0.1, 0.10, sprintf('Total variance: %.1f%%', sum(explained_variance)), ...
+        'FontSize', 10, 'FontWeight', 'bold');
+    text(0.1, 0.05, sprintf('Threshold: %.1f', cluster_threshold), ...
+        'FontSize', 9);
+
+    % Title
+    title_str = sprintf('%s Sessions: PCA-Based Clustering\n%d units × 5 PCs | %d clusters', ...
+        session_name, size(pca_features_sorted, 1), n_clusters);
+    annotation('textbox', [heatmap_left 0.92 heatmap_width 0.05], 'String', title_str, ...
+        'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center');
+
+    % Save figure
+    fig_filename = sprintf('PCA_Heatmap_%s.png', session_name);
+    saveas(fig, fig_filename);
+    fprintf('  Saved: %s\n', fig_filename);
+end
+
+function create_pca_loadings_heatmap(pca_loadings, feature_names, explained_variance, ...
+    session_name, feature_categories)
+% Create heatmap showing PC loadings (how features contribute to each PC)
+%
+% Inputs:
+%   pca_loadings: [n_features × 5] matrix of PC coefficients
+%   feature_names: Cell array of feature names
+%   explained_variance: [5 × 1] variance explained by each PC
+%   session_name: Name of session type
+%   feature_categories: Cell array of feature categories
+
+    n_features = size(pca_loadings, 1);
+
+    % Create figure
+    fig = figure('Position', [50 50 2000 600], ...
+        'Name', sprintf('%s - PC Loadings', session_name));
+
+    % Main heatmap: PCs (rows) × Features (columns)
+    subplot('Position', [0.08 0.25 0.85 0.65]);
+    imagesc(pca_loadings');  % Transpose to get PCs as rows
+    colormap(bluewhitered(256));
+
+    % Set symmetric color limits
+    max_abs_loading = max(abs(pca_loadings(:)));
+    caxis([-max_abs_loading max_abs_loading]);
+
+    cb = colorbar;
+    cb.Position = [0.94 0.25 0.015 0.65];
+    ylabel(cb, 'Loading', 'FontSize', 11);
+
+    % Create PC labels with variance explained
+    pc_labels = cell(5, 1);
+    for i = 1:5
+        pc_labels{i} = sprintf('PC%d (%.1f%%)', i, explained_variance(i));
+    end
+
+    ylabel('Principal Components', 'FontSize', 12, 'FontWeight', 'bold');
+    xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'YTick', 1:5);
+    set(gca, 'YTickLabel', pc_labels);
+    set(gca, 'XTick', 1:n_features);
+    set(gca, 'XTickLabel', feature_names);
+    set(gca, 'XTickLabelRotation', 90);
+    set(gca, 'FontSize', 8);
+
+    % Add vertical grid lines to separate features
+    hold on;
+    for i = 1:n_features-1
+        plot([i+0.5 i+0.5], [0.5 5.5], 'k-', 'LineWidth', 0.1);
+    end
+    hold off;
+
+    % Category color bar at bottom
+    subplot('Position', [0.08 0.15 0.85 0.05]);
+
+    % Get unique categories and assign colors
+    unique_categories = unique(feature_categories, 'stable');
+    n_categories = length(unique_categories);
+    category_colors = lines(n_categories);
+
+    % Create color matrix for features
+    feature_color_matrix = zeros(1, n_features, 3);
+    for f = 1:n_features
+        cat_idx = find(strcmp(unique_categories, feature_categories{f}));
+        feature_color_matrix(1, f, :) = category_colors(cat_idx, :);
+    end
+
+    image(feature_color_matrix);
+    set(gca, 'XTick', []);
+    set(gca, 'YTick', []);
+    ylabel('Category', 'FontSize', 10, 'FontWeight', 'bold', 'Rotation', 0, ...
+        'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle');
+
+    % Category legend at bottom
+    subplot('Position', [0.08 0.02 0.85 0.08]);
+    axis off;
+
+    % Display category legend horizontally
+    n_cols = min(n_categories, 6);  % Max 6 categories per row
+    n_rows = ceil(n_categories / n_cols);
+
+    for c = 1:n_categories
+        row = ceil(c / n_cols) - 1;
+        col = mod(c - 1, n_cols);
+
+        x_pos = col / n_cols;
+        y_pos = 1 - (row + 0.5) / n_rows;
+
+        rectangle('Position', [x_pos y_pos 0.02 0.3], ...
+            'FaceColor', category_colors(c, :), 'EdgeColor', 'k');
+        text(x_pos + 0.025, y_pos + 0.15, unique_categories{c}, ...
+            'FontSize', 9, 'VerticalAlignment', 'middle');
+    end
+
+    % Title
+    title_str = sprintf('%s Sessions: PC Loadings (5 PCs × %d Features)', ...
+        session_name, n_features);
+    annotation('textbox', [0.08 0.92 0.85 0.05], 'String', title_str, ...
+        'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center');
+
+    % Save figure
+    fig_filename = sprintf('PCA_Loadings_%s.png', session_name);
+    saveas(fig, fig_filename);
+    fprintf('  Saved: %s\n', fig_filename);
+end
+
+function create_simplified_heatmap(feature_matrix, feature_names, ...
+    unit_sort_idx, linkage_tree, cluster_assignments, is_aversive, ...
+    session_ids, session_name, config, cluster_threshold)
+% Create simplified heatmap with fewer features
+
+    % Reorder
+    feature_matrix_sorted = feature_matrix(unit_sort_idx, :);
+    is_aversive_sorted = is_aversive(unit_sort_idx);
+
+    % Create figure
+    fig = figure('Position', [150 150 1400 900], ...
+        'Name', sprintf('%s - Simplified Clustering', session_name));
+
+    % Dendrogram
+    if ~isempty(linkage_tree)
+        subplot('Position', [0.05 0.15 0.10 0.75]);
+        dendrogram(linkage_tree, 0, 'Orientation', 'left', ...
+            'ColorThreshold', cluster_threshold);
+        set(gca, 'YDir', 'reverse');
+        set(gca, 'XTickLabel', []);
+        ylabel('Units', 'FontSize', 11);
+        title('Clustering', 'FontSize', 12);
+        heatmap_left = 0.18;
+    else
+        heatmap_left = 0.08;
+    end
+
+    % Heatmap
+    heatmap_width = 0.65;
+    subplot('Position', [heatmap_left 0.15 heatmap_width 0.75]);
+    imagesc(feature_matrix_sorted);
+    colormap(bluewhitered(256));
+    caxis([-3 3]);
+    axis tight;
+
+    cb = colorbar;
+    cb.Position = [heatmap_left + heatmap_width + 0.02 0.15 0.02 0.75];
+    ylabel(cb, 'Z-score', 'FontSize', 11);
+
+    xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Units', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'XTick', 1:length(feature_names));
+    set(gca, 'XTickLabel', feature_names);
+    set(gca, 'XTickLabelRotation', 45);
+    set(gca, 'YTick', []);
+    set(gca, 'FontSize', 10);
+
+    % Session color bar
+    subplot('Position', [heatmap_left - 0.02 0.15 0.01 0.75]);
+    session_colors = zeros(length(unit_sort_idx), 1, 3);
+    for i = 1:length(unit_sort_idx)
+        if is_aversive_sorted(i)
+            session_colors(i, 1, :) = [0.8 0.2 0.2];
+        else
+            session_colors(i, 1, :) = [0.2 0.2 0.8];
+        end
+    end
+    image(session_colors);
+    set(gca, 'XTick', [], 'YTick', []);
+
+    % Title
+    n_clusters = max(cluster_assignments(~isnan(cluster_assignments)));
+    if isnan(n_clusters)
+        n_clusters = 0;
+    end
+    title_str = sprintf('%s: Simplified Clustering (%d units, %d clusters)', ...
+        session_name, size(feature_matrix_sorted, 1), n_clusters);
+    annotation('textbox', [heatmap_left 0.92 heatmap_width 0.05], 'String', title_str, ...
+        'EdgeColor', 'none', 'FontSize', 14, 'FontWeight', 'bold', ...
+        'HorizontalAlignment', 'center');
+end
+
 function cmap = bluewhitered(n)
+% Create blue-white-red colormap
+
     if nargin < 1
         n = 256;
     end
 
-    % Create blue to white to red colormap
     half = ceil(n/2);
 
     % Blue to white
@@ -1620,24 +1332,562 @@ function cmap = bluewhitered(n)
     cmap = cmap(1:n, :);
 end
 
-function cmap = redblue(n)
-    if nargin < 1
-        n = 256;
+%% ========================================================================
+%  FEATURE IMPORTANCE HELPER FUNCTIONS
+%% ========================================================================
+
+function [pvalues, effect_sizes, rankings] = compute_global_feature_importance(feature_matrix, cluster_labels, feature_names)
+% Compute global feature importance using ANOVA and effect sizes
+%
+% Outputs:
+%   pvalues: p-values from Kruskal-Wallis test for each feature
+%   effect_sizes: eta-squared effect sizes
+%   rankings: feature indices sorted by effect size (descending)
+
+    n_features = size(feature_matrix, 2);
+    pvalues = nan(n_features, 1);
+    effect_sizes = nan(n_features, 1);
+
+    unique_clusters = unique(cluster_labels);
+    n_clusters = length(unique_clusters);
+
+    for f = 1:n_features
+        feature_vals = feature_matrix(:, f);
+
+        % Remove NaN values
+        valid_idx = ~isnan(feature_vals);
+        if sum(valid_idx) < n_clusters * 2
+            continue;
+        end
+
+        feature_vals_clean = feature_vals(valid_idx);
+        labels_clean = cluster_labels(valid_idx);
+
+        % Kruskal-Wallis test (non-parametric ANOVA)
+        try
+            pvalues(f) = kruskalwallis(feature_vals_clean, labels_clean, 'off');
+
+            % Compute eta-squared (effect size)
+            % eta^2 = SS_between / SS_total
+            grand_mean = mean(feature_vals_clean);
+            SS_total = sum((feature_vals_clean - grand_mean).^2);
+
+            SS_between = 0;
+            for c = 1:n_clusters
+                cluster_vals = feature_vals_clean(labels_clean == unique_clusters(c));
+                if ~isempty(cluster_vals)
+                    cluster_mean = mean(cluster_vals);
+                    SS_between = SS_between + length(cluster_vals) * (cluster_mean - grand_mean)^2;
+                end
+            end
+
+            if SS_total > 0
+                effect_sizes(f) = SS_between / SS_total;
+            else
+                effect_sizes(f) = 0;
+            end
+        catch
+            pvalues(f) = 1;
+            effect_sizes(f) = 0;
+        end
     end
 
-    % Red to blue colormap
-    half = ceil(n/2);
+    % Rank features by effect size (descending)
+    [~, rankings] = sort(effect_sizes, 'descend', 'MissingPlacement', 'last');
+end
 
-    % Red to white
-    r1 = ones(half, 1);
-    g1 = linspace(0, 1, half)';
-    b1 = linspace(0, 1, half)';
+function [discrimination_matrix, top_features_per_pair] = compute_pairwise_discrimination(feature_matrix, cluster_labels, feature_names, n_clusters)
+% Compute pairwise cluster discrimination using Cohen's d
+%
+% Outputs:
+%   discrimination_matrix: [n_pairs × n_features] matrix of Cohen's d values
+%   top_features_per_pair: cell array of top feature indices for each pair
 
-    % White to blue
-    r2 = linspace(1, 0, half)';
-    g2 = linspace(1, 0, half)';
-    b2 = ones(half, 1);
+    n_features = size(feature_matrix, 2);
+    n_pairs = n_clusters * (n_clusters - 1) / 2;
 
-    cmap = [r1 g1 b1; r2 g2 b2];
-    cmap = cmap(1:n, :);
+    discrimination_matrix = nan(n_pairs, n_features);
+    top_features_per_pair = cell(n_pairs, 1);
+
+    pair_idx = 1;
+    for c1 = 1:n_clusters
+        for c2 = (c1+1):n_clusters
+            % Get data for both clusters
+            cluster1_data = feature_matrix(cluster_labels == c1, :);
+            cluster2_data = feature_matrix(cluster_labels == c2, :);
+
+            % Compute Cohen's d for each feature
+            for f = 1:n_features
+                vals1 = cluster1_data(:, f);
+                vals2 = cluster2_data(:, f);
+
+                % Remove NaNs
+                vals1 = vals1(~isnan(vals1));
+                vals2 = vals2(~isnan(vals2));
+
+                if length(vals1) < 2 || length(vals2) < 2
+                    continue;
+                end
+
+                % Cohen's d = (mean1 - mean2) / pooled_std
+                mean1 = mean(vals1);
+                mean2 = mean(vals2);
+                std1 = std(vals1);
+                std2 = std(vals2);
+
+                n1 = length(vals1);
+                n2 = length(vals2);
+
+                % Pooled standard deviation
+                pooled_std = sqrt(((n1-1)*std1^2 + (n2-1)*std2^2) / (n1 + n2 - 2));
+
+                if pooled_std > 0
+                    discrimination_matrix(pair_idx, f) = abs((mean1 - mean2) / pooled_std);
+                end
+            end
+
+            % Find top features for this pair
+            [~, top_idx] = sort(discrimination_matrix(pair_idx, :), 'descend', 'MissingPlacement', 'last');
+            top_features_per_pair{pair_idx} = top_idx(1:min(10, n_features));
+
+            pair_idx = pair_idx + 1;
+        end
+    end
+end
+
+function create_feature_importance_heatmap(feature_matrix, cluster_labels, feature_names, feature_categories, feature_rankings, session_name)
+% Create heatmap showing mean feature values per cluster
+
+    unique_clusters = unique(cluster_labels);
+    n_clusters = length(unique_clusters);
+    n_features = length(feature_names);
+
+    % Compute mean feature value per cluster
+    cluster_means = nan(n_clusters, n_features);
+    for c = 1:n_clusters
+        cluster_data = feature_matrix(cluster_labels == unique_clusters(c), :);
+        cluster_means(c, :) = nanmean(cluster_data, 1);
+    end
+
+    % Reorder features by importance
+    top_n = min(30, n_features);
+    top_features = feature_rankings(1:top_n);
+    cluster_means_sorted = cluster_means(:, top_features);
+    feature_names_sorted = feature_names(top_features);
+
+    % Create figure
+    fig = figure('Position', [100 100 1400 800], ...
+        'Name', sprintf('%s - Feature Importance Heatmap', session_name));
+
+    % Heatmap
+    subplot('Position', [0.15 0.15 0.70 0.70]);
+    imagesc(cluster_means_sorted');
+    colormap(bluewhitered(256));
+    caxis([-3 3]);
+
+    % Labels
+    xlabel('Cluster', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Features (ranked by importance)', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'XTick', 1:n_clusters);
+    set(gca, 'XTickLabel', unique_clusters);
+    set(gca, 'YTick', 1:top_n);
+    set(gca, 'YTickLabel', feature_names_sorted);
+    set(gca, 'FontSize', 9);
+
+    % Colorbar
+    cb = colorbar;
+    cb.Position = [0.87 0.15 0.02 0.70];
+    ylabel(cb, 'Mean Z-score', 'FontSize', 11);
+
+    % Title
+    title(sprintf('%s: Top %d Features by Cluster', session_name, top_n), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+end
+
+function create_pairwise_discrimination_heatmap(discrimination_matrix, feature_names, n_clusters, session_name)
+% Create heatmap showing pairwise cluster discrimination
+
+    n_features = length(feature_names);
+    n_pairs = size(discrimination_matrix, 1);
+
+    % Find top features overall
+    mean_discrimination = nanmean(discrimination_matrix, 1);
+    [~, top_idx] = sort(mean_discrimination, 'descend', 'MissingPlacement', 'last');
+    top_n = min(20, n_features);
+    top_features = top_idx(1:top_n);
+
+    % Create pair labels
+    pair_labels = cell(n_pairs, 1);
+    pair_idx = 1;
+    for c1 = 1:n_clusters
+        for c2 = (c1+1):n_clusters
+            pair_labels{pair_idx} = sprintf('%d vs %d', c1, c2);
+            pair_idx = pair_idx + 1;
+        end
+    end
+
+    % Create figure
+    fig = figure('Position', [150 150 1200 900], ...
+        'Name', sprintf('%s - Pairwise Discrimination', session_name));
+
+    % Heatmap
+    subplot('Position', [0.15 0.10 0.70 0.75]);
+    imagesc(discrimination_matrix(:, top_features)');
+    colormap(hot);
+
+    % Labels
+    xlabel('Cluster Pairs', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'XTick', 1:n_pairs);
+    set(gca, 'XTickLabel', pair_labels);
+    set(gca, 'XTickLabelRotation', 45);
+    set(gca, 'YTick', 1:top_n);
+    set(gca, 'YTickLabel', feature_names(top_features));
+    set(gca, 'FontSize', 9);
+
+    % Colorbar
+    cb = colorbar;
+    cb.Position = [0.87 0.10 0.02 0.75];
+    ylabel(cb, 'Cohen''s d', 'FontSize', 11);
+
+    % Title
+    title(sprintf('%s: Pairwise Cluster Discrimination (Top %d Features)', session_name, top_n), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+end
+
+function create_top_features_plot(feature_rankings, feature_names, pvalues, effect_sizes, session_name)
+% Create bar plot of top features by effect size
+
+    top_n = min(20, length(feature_rankings));
+    top_indices = feature_rankings(1:top_n);
+
+    % Create figure
+    fig = figure('Position', [200 200 1000 700], ...
+        'Name', sprintf('%s - Top Features', session_name));
+
+    % Bar plot of effect sizes
+    subplot(2, 1, 1);
+    barh(1:top_n, effect_sizes(top_indices), 'FaceColor', [0.2 0.5 0.8]);
+    set(gca, 'YDir', 'reverse');
+    set(gca, 'YTick', 1:top_n);
+    set(gca, 'YTickLabel', feature_names(top_indices));
+    xlabel('Effect Size (η²)', 'FontSize', 11, 'FontWeight', 'bold');
+    ylabel('Features', 'FontSize', 11, 'FontWeight', 'bold');
+    title('Top Features by Effect Size', 'FontSize', 13, 'FontWeight', 'bold');
+    grid on;
+    xlim([0 max(effect_sizes(top_indices)) * 1.1]);
+
+    % Add effect size values
+    for i = 1:top_n
+        text(effect_sizes(top_indices(i)) + 0.01, i, ...
+            sprintf('%.3f', effect_sizes(top_indices(i))), ...
+            'FontSize', 9, 'VerticalAlignment', 'middle');
+    end
+
+    % Bar plot of -log10(p-values)
+    subplot(2, 1, 2);
+    neg_log_p = -log10(pvalues(top_indices));
+    neg_log_p(isinf(neg_log_p)) = 50; % Cap very small p-values
+
+    barh(1:top_n, neg_log_p, 'FaceColor', [0.8 0.3 0.2]);
+    set(gca, 'YDir', 'reverse');
+    set(gca, 'YTick', 1:top_n);
+    set(gca, 'YTickLabel', feature_names(top_indices));
+    xlabel('-log₁₀(p-value)', 'FontSize', 11, 'FontWeight', 'bold');
+    ylabel('Features', 'FontSize', 11, 'FontWeight', 'bold');
+    title('Statistical Significance', 'FontSize', 13, 'FontWeight', 'bold');
+    grid on;
+
+    % Add significance threshold line (p=0.05)
+    hold on;
+    plot([-log10(0.05) -log10(0.05)], [0 top_n+1], 'r--', 'LineWidth', 2);
+    text(-log10(0.05), 0.5, '  p=0.05', 'Color', 'r', 'FontSize', 10, 'FontWeight', 'bold');
+    hold off;
+
+    % Overall title
+    sgtitle(sprintf('%s: Top %d Discriminative Features', session_name, top_n), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+end
+
+function [rf_importance, rf_rankings] = compute_random_forest_importance(feature_matrix, cluster_labels, feature_names)
+% Compute feature importance using Random Forest classifier
+%
+% Outputs:
+%   rf_importance: importance score for each feature
+%   rf_rankings: feature indices sorted by importance (descending)
+
+    n_features = size(feature_matrix, 2);
+    n_samples = size(feature_matrix, 1);
+
+    % Remove features with too many NaNs
+    valid_features = sum(~isnan(feature_matrix), 1) > n_samples * 0.3;
+    feature_matrix_clean = feature_matrix(:, valid_features);
+
+    % Remove samples with too many NaNs
+    valid_samples = sum(~isnan(feature_matrix_clean), 2) > sum(valid_features) * 0.5;
+    feature_matrix_clean = feature_matrix_clean(valid_samples, :);
+    cluster_labels_clean = cluster_labels(valid_samples);
+
+    % Impute remaining NaNs with column mean
+    for f = 1:size(feature_matrix_clean, 2)
+        col = feature_matrix_clean(:, f);
+        if any(isnan(col))
+            col(isnan(col)) = nanmean(col);
+            feature_matrix_clean(:, f) = col;
+        end
+    end
+
+    % Train Random Forest
+    n_trees = 100;
+    try
+        rf_model = TreeBagger(n_trees, feature_matrix_clean, cluster_labels_clean, ...
+            'Method', 'classification', 'OOBPredictorImportance', 'on', 'NumPrint', 0);
+
+        % Get feature importance
+        importance_clean = rf_model.OOBPermutedPredictorDeltaError;
+
+        % Map back to original feature indices
+        rf_importance = zeros(n_features, 1);
+        valid_idx = find(valid_features);
+        rf_importance(valid_idx) = importance_clean;
+    catch
+        warning('Random Forest failed, using uniform importance');
+        rf_importance = ones(n_features, 1) / n_features;
+    end
+
+    % Rank features by importance
+    [~, rf_rankings] = sort(rf_importance, 'descend');
+end
+
+function [selected_features, quality_curve, rankings] = perform_rfe_with_validation(feature_matrix, cluster_labels, feature_names, min_features, quality_threshold)
+% Recursive Feature Elimination with cluster quality validation
+%
+% Outputs:
+%   selected_features: indices of selected features
+%   quality_curve: cluster quality at each step
+%   rankings: elimination order (most important = eliminated last)
+
+    n_features = size(feature_matrix, 2);
+    n_samples = size(feature_matrix, 1);
+
+    % Clean data
+    valid_features = sum(~isnan(feature_matrix), 1) > n_samples * 0.3;
+    feature_matrix_clean = feature_matrix(:, valid_features);
+    feature_names_valid = feature_names;
+    feature_names_valid = feature_names_valid(valid_features);
+
+    valid_samples = sum(~isnan(feature_matrix_clean), 2) > sum(valid_features) * 0.5;
+    feature_matrix_clean = feature_matrix_clean(valid_samples, :);
+    cluster_labels_clean = cluster_labels(valid_samples);
+
+    % Impute NaNs
+    for f = 1:size(feature_matrix_clean, 2)
+        col = feature_matrix_clean(:, f);
+        if any(isnan(col))
+            col(isnan(col)) = nanmean(col);
+            feature_matrix_clean(:, f) = col;
+        end
+    end
+
+    % Initial feature set
+    remaining_features = 1:size(feature_matrix_clean, 2);
+    elimination_order = [];
+    quality_curve = [];
+
+    % Baseline quality (all features)
+    baseline_quality = compute_cluster_quality(feature_matrix_clean, cluster_labels_clean);
+    quality_curve(1) = baseline_quality;
+
+    fprintf('    Baseline quality: %.4f\n', baseline_quality);
+
+    % RFE loop
+    while length(remaining_features) > min_features
+        % Train RF on current features
+        current_matrix = feature_matrix_clean(:, remaining_features);
+
+        try
+            rf_model = TreeBagger(50, current_matrix, cluster_labels_clean, ...
+                'Method', 'classification', 'OOBPredictorImportance', 'on', 'NumPrint', 0);
+            importances = rf_model.OOBPermutedPredictorDeltaError;
+        catch
+            % If RF fails, use univariate importance
+            importances = ones(length(remaining_features), 1);
+            for f = 1:length(remaining_features)
+                feat_vals = current_matrix(:, f);
+                if std(feat_vals) > 0
+                    [~, p] = kruskalwallis(feat_vals, cluster_labels_clean, 'off');
+                    importances(f) = -log10(p + 1e-10);
+                end
+            end
+        end
+
+        % Remove least important feature
+        [~, least_important_idx] = min(importances);
+        fprintf('    Removed %d features: %s \n', remaining_features(least_important_idx), feature_names_valid{remaining_features(least_important_idx)});
+        elimination_order(end+1) = remaining_features(least_important_idx);
+        remaining_features(least_important_idx) = [];
+        
+
+        % Evaluate quality after removal
+        current_matrix = feature_matrix_clean(:, remaining_features);
+        current_quality = compute_cluster_quality(current_matrix, cluster_labels_clean);
+        quality_curve(end+1) = current_quality;
+
+        % Check if quality degraded too much
+        quality_drop = (baseline_quality - current_quality) / baseline_quality;
+
+        if mod(length(remaining_features), 5) == 0 || quality_drop > quality_threshold
+            fprintf('    %d features: quality=%.4f (drop=%.1f%%)\n', ...
+                length(remaining_features), current_quality, quality_drop * 100);
+        end
+
+        % Stop if quality degrades beyond threshold
+        if quality_drop > quality_threshold
+            fprintf('    Quality threshold exceeded, stopping RFE\n');
+            % Add back the last eliminated feature
+            remaining_features = [remaining_features, eliminated_feature];
+            elimination_order(end) = [];
+            quality_curve(end) = [];
+            break;
+        end
+    end
+
+    % Map back to original feature indices
+    valid_idx = find(valid_features);
+    selected_features = valid_idx(remaining_features);
+    eliminated_features = valid_idx(elimination_order(end:-1:1));
+
+    % Rankings: features eliminated last are most important
+    rankings = [remaining_features, eliminated_features];
+
+    fprintf('    Selected %d features with quality %.4f\n', length(selected_features), quality_curve(end));
+end
+
+function quality = compute_cluster_quality(feature_matrix, cluster_labels)
+% Compute cluster quality using silhouette score
+
+    try
+        % Compute pairwise distances
+        distances = pdist(feature_matrix, 'euclidean');
+
+        % Compute silhouette values
+        silhouette_vals = silhouette([], cluster_labels, distances);
+
+        % Average silhouette score
+        quality = mean(silhouette_vals);
+    catch
+        % Fallback: use simpler metric
+        unique_clusters = unique(cluster_labels);
+        within_var = 0;
+        between_var = 0;
+
+        grand_mean = mean(feature_matrix, 1);
+
+        for c = 1:length(unique_clusters)
+            cluster_data = feature_matrix(cluster_labels == unique_clusters(c), :);
+            cluster_mean = mean(cluster_data, 1);
+            within_var = within_var + sum(sum((cluster_data - cluster_mean).^2));
+            between_var = between_var + size(cluster_data, 1) * sum((cluster_mean - grand_mean).^2);
+        end
+
+        % Variance ratio (higher is better)
+        quality = between_var / (between_var + within_var + eps);
+    end
+end
+
+function create_rfe_quality_plot(quality_curve, selected_features, feature_names, session_name)
+% Plot RFE quality curve showing cluster quality vs number of features
+
+    n_points = length(quality_curve);
+    n_features_curve = (size(feature_names, 2)):-1:(size(feature_names, 2) - n_points + 1);
+
+    fig = figure('Position', [250 250 1000 600], ...
+        'Name', sprintf('%s - RFE Quality Curve', session_name));
+
+    % Quality curve
+    plot(n_features_curve, quality_curve, 'b-o', 'LineWidth', 2, 'MarkerSize', 6);
+    hold on;
+
+    % Mark selected point
+    plot(length(selected_features), quality_curve(end), 'ro', ...
+        'MarkerSize', 12, 'LineWidth', 3);
+
+    % Add quality drop threshold line
+    baseline = quality_curve(1);
+    threshold_line = baseline * 0.95; % 5% drop
+    plot([min(n_features_curve) max(n_features_curve)], [threshold_line threshold_line], ...
+        'r--', 'LineWidth', 1.5);
+
+    hold off;
+    grid on;
+
+    xlabel('Number of Features', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Cluster Quality (Silhouette Score)', 'FontSize', 12, 'FontWeight', 'bold');
+    title(sprintf('%s: RFE Quality Curve (Selected %d features)', session_name, length(selected_features)), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+
+    legend({'Quality Curve', sprintf('Selected (%d features)', length(selected_features)), ...
+        '5% Quality Threshold'}, 'Location', 'best');
+end
+
+function create_feature_comparison_plot(univ_rankings, rf_rankings, rfe_rankings, feature_names, effect_sizes, rf_importance, session_name)
+% Create comparison plot showing top features from all three methods
+
+    top_n = 15;
+
+    % Get top features from each method (ensure column vectors)
+    univ_top = univ_rankings(1:min(top_n, length(univ_rankings)));
+    univ_top = univ_top(:);  % Force column vector
+
+    rf_top = rf_rankings(1:min(top_n, length(rf_rankings)));
+    rf_top = rf_top(:);  % Force column vector
+
+    rfe_top = rfe_rankings(1:min(top_n, length(rfe_rankings)));
+    rfe_top = rfe_top(:);  % Force column vector
+
+    % Union of all top features
+    all_top_features = unique([univ_top; rf_top; rfe_top]);
+    n_shown = length(all_top_features);
+
+    % Create ranking matrix (lower rank = better)
+    ranking_matrix = nan(n_shown, 3);
+
+    for i = 1:n_shown
+        feat_idx = all_top_features(i);
+
+        % Find rank in each method
+        univ_rank = find(univ_rankings == feat_idx);
+        rf_rank = find(rf_rankings == feat_idx);
+        rfe_rank = find(rfe_rankings == feat_idx);
+
+        if ~isempty(univ_rank), ranking_matrix(i, 1) = univ_rank; end
+        if ~isempty(rf_rank), ranking_matrix(i, 2) = rf_rank; end
+        if ~isempty(rfe_rank), ranking_matrix(i, 3) = rfe_rank; end
+    end
+
+    % Create figure
+    fig = figure('Position', [300 300 1200 800], ...
+        'Name', sprintf('%s - Feature Selection Comparison', session_name));
+
+    % Heatmap of rankings
+    imagesc(ranking_matrix');
+    colormap(flipud(hot));
+
+    xlabel('Features', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Method', 'FontSize', 12, 'FontWeight', 'bold');
+
+    set(gca, 'YTick', 1:3);
+    set(gca, 'YTickLabel', {'Univariate', 'RandomForest', 'RFE'});
+    set(gca, 'XTick', 1:n_shown);
+    set(gca, 'XTickLabel', feature_names(all_top_features));
+    set(gca, 'XTickLabelRotation', 90);
+    set(gca, 'FontSize', 9);
+
+    cb = colorbar;
+    ylabel(cb, 'Rank (lower = better)', 'FontSize', 11);
+
+    title(sprintf('%s: Feature Selection Method Comparison', session_name), ...
+        'FontSize', 14, 'FontWeight', 'bold');
 end

@@ -52,6 +52,10 @@ for i = 1:length(aversive_files)
     load(fullfile(RewardAversivePath, aversive_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Aversive'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({aversive_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (ensures uniqueness across sessions)
+        session_results.data.UniqueUnitID = i * 1000 + double(session_results.data.Unit);
         all_data_aversive = [all_data_aversive; session_results.data];
     end
 end
@@ -60,6 +64,10 @@ for i = 1:length(reward_files)
     load(fullfile(RewardSeekingPath, reward_files(i).name), 'session_results', 'config');
     if ~isempty(session_results.data)
         session_results.data.SessionType = repmat({'Reward'}, height(session_results.data), 1);
+        session_results.data.SessionID = repmat(i + 10000, height(session_results.data), 1);
+        session_results.data.SessionName = repmat({reward_files(i).name}, height(session_results.data), 1);
+        % Create unique unit ID: SessionID * 1000 + Unit (10000 offset for reward sessions)
+        session_results.data.UniqueUnitID = (i + 10000) * 1000 + double(session_results.data.Unit);
         all_data_reward = [all_data_reward; session_results.data];
     end
 end
@@ -303,6 +311,69 @@ saveas(fig5, fullfile(output_dir, 'Figure5_8Hz_Sniffing_Detailed_Analysis.png'))
 fprintf('  ✓ Saved\n');
 
 %% ========================================================================
+%  FIGURE 5: UNIT × FREQUENCY HEATMAP (All Units, All Frequencies)
+%  ========================================================================
+
+fprintf('Creating Figure 5: Unit × Frequency Heatmap...\n');
+
+% CONFIGURABLE: Select which periods to include in heatmap (default: 1-4)
+periods_to_include = 1:4;
+
+fig5 = figure('Position', [250, 250, 1800, 900]);
+if length(periods_to_include) == 1
+    sgtitle(sprintf('Mean Vector Length: Units × Frequencies (Period %d)', periods_to_include), 'FontSize', 16, 'FontWeight', 'bold');
+else
+    sgtitle(sprintf('Mean Vector Length: Units × Frequencies (Periods %d-%d avg)', min(periods_to_include), max(periods_to_include)), 'FontSize', 16, 'FontWeight', 'bold');
+end
+
+% Aversive (average across selected periods)
+subplot(1, 2, 1);
+aversive_selected = tbl(tbl.SessionType == 'Aversive' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(aversive_selected)
+    heatmap_data_av = createFTAHeatmap(aversive_selected, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_av, 1), heatmap_data_av, [0,0.1]);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Aversive P%d (n=%d units)', periods_to_include, size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Aversive P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
+    xlim([0 20]);
+    hold on;
+    plot([8 8], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+% Reward (average across selected periods)
+subplot(1, 2, 2);
+reward_selected = tbl(tbl.SessionType == 'Reward' & ismember(tbl.Period, periods_to_include), :);
+if ~isempty(reward_selected)
+    heatmap_data_rw = createFTAHeatmap(reward_selected, unique_freqs);
+    imagesc(unique_freqs, 1:size(heatmap_data_rw, 1), heatmap_data_rw, [0,0.1]);
+    set(gca, 'YDir', 'normal');
+    colorbar;
+    colormap(jet);
+    xlabel('Frequency (Hz)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel('Unit', 'FontSize', 12, 'FontWeight', 'bold');
+    if length(periods_to_include) == 1
+        title(sprintf('Reward P%d (n=%d units)', periods_to_include, size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    else
+        title(sprintf('Reward P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
+    end
+    xlim([0 20]);
+    hold on;
+    plot([8 8], ylim, 'k--', 'LineWidth', 2);
+    hold off;
+end
+
+saveas(fig5, fullfile(output_dir, 'Figure5_Unit_Frequency_MVL_Heatmap.png'));
+fprintf('  ✓ Saved\n');
+
+%% ========================================================================
 %  COMPLETION
 %  ========================================================================
 
@@ -328,7 +399,7 @@ function plot_fta_cartesian(data, phase_centers, color)
 % Plot FTA curve in Cartesian coordinates
 
     % Average FTA curves across all entries
-    all_curves = cell2mat(data.FTA_Curve');
+    all_curves = cell2mat(data.FTA_Curve);
     mean_fta = mean(all_curves, 1);
     sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 
@@ -353,7 +424,7 @@ function plot_fta_polar(data, phase_centers, color)
 % Plot FTA curve in polar coordinates
 
     % Average FTA curves
-    all_curves = cell2mat(data.FTA_Curve');
+    all_curves = cell2mat(data.FTA_Curve);
     mean_fta = mean(all_curves, 1);
 
     % Plot in polar coordinates
@@ -419,7 +490,7 @@ function plot_frequency_average_fta(data_freq, phase_centers, color_aversive, co
     % Aversive
     aversive_data = data_freq(data_freq.SessionType == 'Aversive', :);
     if ~isempty(aversive_data)
-        all_curves = cell2mat(aversive_data.FTA_Curve');
+        all_curves = cell2mat(aversive_data.FTA_Curve);
         mean_fta = mean(all_curves, 1);
         sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 
@@ -432,7 +503,7 @@ function plot_frequency_average_fta(data_freq, phase_centers, color_aversive, co
     % Reward
     reward_data = data_freq(data_freq.SessionType == 'Reward', :);
     if ~isempty(reward_data)
-        all_curves = cell2mat(reward_data.FTA_Curve');
+        all_curves = cell2mat(reward_data.FTA_Curve);
         mean_fta = mean(all_curves, 1);
         sem_fta = std(all_curves, 0, 1) / sqrt(size(all_curves, 1));
 
@@ -494,4 +565,38 @@ function plot_preferred_phase_distribution(data, color, session_label)
 
     title(sprintf('%s: Preferred Phase', session_label), 'FontSize', 12, 'FontWeight', 'bold');
     thetalim([-180 180]);
+end
+
+
+function heatmap_data = createFTAHeatmap(data, unique_freqs)
+% Create heatmap matrix: units × frequencies (Mean Vector Length)
+%
+% INPUTS:
+%   data         - Table with FTA data for one period
+%   unique_freqs - Vector of unique frequency values
+%
+% OUTPUTS:
+%   heatmap_data - Matrix (n_units × n_freqs) of MVL values
+
+    % FIX: Use UniqueUnitID to prevent collision across sessions
+    unique_units = unique(data.UniqueUnitID);
+    n_units = length(unique_units);
+    n_freqs = length(unique_freqs);
+
+    heatmap_data = nan(n_units, n_freqs);
+
+    for u = 1:n_units
+        % FIX: Filter by UniqueUnitID instead of Unit
+        unit_data = data(data.UniqueUnitID == unique_units(u), :);
+
+        for f = 1:n_freqs
+            freq = unique_freqs(f);
+            freq_center = (unit_data.Freq_Low_Hz + unit_data.Freq_High_Hz) / 2;
+            freq_data = unit_data(abs(freq_center - freq) < 0.1, :);
+
+            if ~isempty(freq_data)
+                heatmap_data(u, f) = mean(freq_data.Mean_Vector_Length, 'omitnan');
+            end
+        end
+    end
 end

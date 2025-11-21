@@ -1,14 +1,14 @@
 %% ========================================================================
 %  VISUALIZE UNIT FEATURES: Period × SessionType Analysis
-%  Comprehensive visualization of 22 spike train metrics
+%  Comprehensive visualization of 23 spike train metrics
 %  ========================================================================
 %
 %  Visualizes results from Unit_Features_Analysis.m
 %
 %  Creates 3 comprehensive figures:
 %  Figure 1: Core Spike Metrics (4x4 grid, 16 subplots)
-%  Figure 2: Temporal Structure Metrics (3x3 grid, 9 subplots)
-%  Figure 3: Comprehensive Heatmap (all 22 metrics)
+%  Figure 2: Temporal Structure Metrics (4x3 grid, 12 subplots)
+%  Figure 3: Comprehensive Heatmap (all 23 metrics)
 %
 %% ========================================================================
 
@@ -89,7 +89,7 @@ subplot(4, 4, 6);
 plotMetricByPeriod(tbl, 'CV2', 'Local CV (CV2)', color_aversive, color_reward);
 
 subplot(4, 4, 7);
-plotMetricByPeriod(tbl, 'LVR', 'Revised Local Var (LVR)', color_aversive, color_reward);
+plotMetricByPeriod(tbl, 'Count_ACF_1ms_peak_ind', 'Count ACF 1ms Peak Index', color_aversive, color_reward);
 
 subplot(4, 4, 8);
 plotMetricByPeriod(tbl, 'ISI_Mode', 'ISI Mode (s)', color_aversive, color_reward);
@@ -118,50 +118,60 @@ subplot(4, 4, 15);
 plotMetricByPeriod(tbl, 'ISI_ACF_lag', 'ISI ACF Lag (s)', color_aversive, color_reward);
 
 subplot(4, 4, 16);
-plotMetricByPeriod(tbl, 'ISI_ACF_decay', 'ISI ACF Decay (s)', color_aversive, color_reward);
+plotMetricByPeriod(tbl, 'Count_ACF_25ms_peak_ind', 'Count ACF 25ms Peak Index', color_aversive, color_reward);
 
 saveas(fig1, fullfile(output_dir, 'Figure1_Core_Spike_Metrics.png'));
 fprintf('  ✓ Saved: Figure1_Core_Spike_Metrics.png\n');
 
 %% ========================================================================
-%  FIGURE 2: TEMPORAL STRUCTURE METRICS (3x3 = 9 subplots)
+%  FIGURE 2: TEMPORAL STRUCTURE METRICS (4x3 = 12 subplots)
 %  ========================================================================
 
 fprintf('Creating Figure 2: Temporal Structure Metrics...\n');
 
-fig2 = figure('Position', [100, 100, 1600, 1200]);
+fig2 = figure('Position', [100, 100, 1600, 1400]);
 sgtitle('Temporal Structure Metrics: Period × SessionType', 'FontSize', 16, 'FontWeight', 'bold');
 
-% Row 1: Count ACF (3 bin sizes)
-subplot(3, 3, 1);
+% Row 1: Count ACF Peak (3 bin sizes)
+subplot(4, 3, 1);
 plotMetricByPeriod(tbl, 'Count_ACF_1ms_peak', 'Count ACF Peak (1ms)', color_aversive, color_reward);
 
-subplot(3, 3, 2);
+subplot(4, 3, 2);
 plotMetricByPeriod(tbl, 'Count_ACF_25ms_peak', 'Count ACF Peak (25ms)', color_aversive, color_reward);
 
-subplot(3, 3, 3);
+subplot(4, 3, 3);
 plotMetricByPeriod(tbl, 'Count_ACF_50ms_peak', 'Count ACF Peak (50ms)', color_aversive, color_reward);
 
-% Row 2: Count Fano Factor (3 bin sizes)
-subplot(3, 3, 4);
+% Row 2: Count ACF Peak Index (3 bin sizes) - NEW
+subplot(4, 3, 4);
+plotMetricByPeriod(tbl, 'Count_ACF_1ms_peak_ind', 'Count ACF Peak Index (1ms)', color_aversive, color_reward);
+
+subplot(4, 3, 5);
+plotMetricByPeriod(tbl, 'Count_ACF_25ms_peak_ind', 'Count ACF Peak Index (25ms)', color_aversive, color_reward);
+
+subplot(4, 3, 6);
+plotMetricByPeriod(tbl, 'Count_ACF_50ms_peak_ind', 'Count ACF Peak Index (50ms)', color_aversive, color_reward);
+
+% Row 3: Count Fano Factor (3 bin sizes)
+subplot(4, 3, 7);
 plotMetricByPeriod(tbl, 'CountFanoFactor_1ms', 'Count Fano Factor (1ms)', color_aversive, color_reward);
 
-subplot(3, 3, 5);
+subplot(4, 3, 8);
 plotMetricByPeriod(tbl, 'CountFanoFactor_25ms', 'Count Fano Factor (25ms)', color_aversive, color_reward);
 
-subplot(3, 3, 6);
+subplot(4, 3, 9);
 plotMetricByPeriod(tbl, 'CountFanoFactor_50ms', 'Count Fano Factor (50ms)', color_aversive, color_reward);
 
-% Row 3: Summary comparison plots
-subplot(3, 3, 7);
+% Row 4: Summary comparison plots
+subplot(4, 3, 10);
 % Compare ACF across bin sizes for Aversive
 plotACFComparison(tbl, 'Aversive', color_aversive);
 
-subplot(3, 3, 8);
+subplot(4, 3, 11);
 % Compare ACF across bin sizes for Reward
 plotACFComparison(tbl, 'Reward', color_reward);
 
-subplot(3, 3, 9);
+subplot(4, 3, 12);
 % Compare Fano Factor across bin sizes
 plotFanoComparison(tbl, color_aversive, color_reward);
 
@@ -174,17 +184,19 @@ fprintf('  ✓ Saved: Figure2_Temporal_Structure_Metrics.png\n');
 
 fprintf('Creating Figure 3: Comprehensive Heatmap...\n');
 
-% List all 22 metrics
-all_metrics = {'FR', 'CV', 'ISI_FanoFactor', 'ISI_ACF_peak', 'ISI_ACF_lag', 'ISI_ACF_decay', ...
+% List all 23 metrics (removed LVR and ISI_ACF_decay, added Count_ACF peak indices)
+all_metrics = {'FR', 'CV', 'ISI_FanoFactor', 'ISI_ACF_peak', 'ISI_ACF_lag', ...
                'Count_ACF_1ms_peak', 'Count_ACF_25ms_peak', 'Count_ACF_50ms_peak', ...
-               'LV', 'CV2', 'LVR', 'BurstIndex', 'BurstRate', 'MeanBurstLength', ...
+               'Count_ACF_1ms_peak_ind', 'Count_ACF_25ms_peak_ind', 'Count_ACF_50ms_peak_ind', ...
+               'LV', 'CV2', 'BurstIndex', 'BurstRate', 'MeanBurstLength', ...
                'ISI_Skewness', 'ISI_Kurtosis', 'ISI_Mode', ...
                'CountFanoFactor_1ms', 'CountFanoFactor_25ms', 'CountFanoFactor_50ms', ...
                'RefracViolations'};
 
-metric_labels = {'FR', 'CV', 'ISI Fano', 'ISI ACF peak', 'ISI ACF lag', 'ISI ACF decay', ...
-                 'Count ACF 1ms', 'Count ACF 25ms', 'Count ACF 50ms', ...
-                 'LV', 'CV2', 'LVR', 'Burst Index', 'Burst Rate', 'Burst Length', ...
+metric_labels = {'FR', 'CV', 'ISI Fano', 'ISI ACF peak', 'ISI ACF lag', ...
+                 'Count ACF 1ms pk', 'Count ACF 25ms pk', 'Count ACF 50ms pk', ...
+                 'Count ACF 1ms ind', 'Count ACF 25ms ind', 'Count ACF 50ms ind', ...
+                 'LV', 'CV2', 'Burst Index', 'Burst Rate', 'Burst Length', ...
                  'ISI Skew', 'ISI Kurt', 'ISI Mode', ...
                  'Count FF 1ms', 'Count FF 25ms', 'Count FF 50ms', ...
                  'Refrac Viol'};
@@ -202,7 +214,7 @@ caxis([-2, 2]);  % Set consistent color scale
 xlabel('Period', 'FontSize', 12, 'FontWeight', 'bold');
 ylabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
 title('Aversive Sessions (7 periods)', 'FontSize', 13, 'FontWeight', 'bold');
-set(gca, 'XTick', 1:7, 'YTick', 1:22, 'YTickLabel', metric_labels, 'FontSize', 10);
+set(gca, 'XTick', 1:7, 'YTick', 1:23, 'YTickLabel', metric_labels, 'FontSize', 10);
 colormap(jet);
 
 % Create heatmap for Reward (4 periods)
@@ -215,7 +227,7 @@ caxis([-2, 2]);  % Set consistent color scale
 xlabel('Period', 'FontSize', 12, 'FontWeight', 'bold');
 ylabel('Metric', 'FontSize', 12, 'FontWeight', 'bold');
 title('Reward Sessions (4 periods)', 'FontSize', 13, 'FontWeight', 'bold');
-set(gca, 'XTick', 1:4, 'YTick', 1:22, 'YTickLabel', metric_labels, 'FontSize', 10);
+set(gca, 'XTick', 1:4, 'YTick', 1:23, 'YTickLabel', metric_labels, 'FontSize', 10);
 colormap(jet);
 
 saveas(fig3, fullfile(output_dir, 'Figure3_Comprehensive_Heatmap.png'));
@@ -253,7 +265,7 @@ if ~isempty(aversive_selected)
     else
         title(sprintf('Aversive P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_av, 1)), 'FontSize', 13, 'FontWeight', 'bold');
     end
-    set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
+    set(gca, 'XTick', 1:23, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
     set(gca, 'YTick', []);
 end
 
@@ -273,7 +285,7 @@ if ~isempty(reward_selected)
     else
         title(sprintf('Reward P%d-%d avg (n=%d units)', min(periods_to_include), max(periods_to_include), size(heatmap_data_rw, 1)), 'FontSize', 13, 'FontWeight', 'bold');
     end
-    set(gca, 'XTick', 1:22, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
+    set(gca, 'XTick', 1:23, 'XTickLabel', metric_labels, 'XTickLabelRotation', 90, 'FontSize', 8);
     set(gca, 'YTick', []);
 end
 

@@ -2,8 +2,8 @@
 UNIT FEATURES ANALYSIS - SUMMARY STATISTICS
 ========================================
 
-Data file: Unit_features_analysis_16-Nov-2025.mat
-Generated: 16-Nov-2025 19:41:34
+Data file: Unit_features_analysis_18-Nov-2025.mat
+Generated: 18-Nov-2025 21:30:26
 
 Dataset Overview:
   Total data points: 5674
@@ -30,9 +30,9 @@ Periods: 4
 Data points: 2160
 
 Key Metrics (mean ± std):
-  FR: 7.23 ± 11.38 Hz
-  CV: 1.35 ± 0.58
-  ISI_FanoFactor: 2.81 ± 10.49
+  FR: 7.25 ± 11.42 Hz
+  CV: 1.34 ± 0.59
+  ISI_FanoFactor: 2.72 ± 9.59
   BurstIndex: 0.053 ± 0.083
   RefracViolations: 0.01 ± 0.03 %
 

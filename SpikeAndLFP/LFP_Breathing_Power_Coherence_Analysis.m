@@ -106,7 +106,7 @@ fprintf('==== PROCESSING AVERSIVE SESSIONS ====\n');
 
 n_valid_aversive = 0;
 
-for sess_idx = 1:num_aversive_sessions
+for sess_idx = 10:num_aversive_sessions
     fprintf('\n[%d/%d] %s\n', sess_idx, num_aversive_sessions, allfiles_aversive(sess_idx).name);
     tic;
 
