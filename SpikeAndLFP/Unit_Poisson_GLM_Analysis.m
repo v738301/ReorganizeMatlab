@@ -411,7 +411,7 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     for i = 1:length(continuous_signals)
         signal = continuous_signals{i};
         % Pad and convolve
-        signal_padded = [zeros(n_bins_continuous, 1); signal; zeros(n_bins_continuous - 1, 1)];
+        signal_padded = [zeros(n_bins_continuous, 1); signal(:); zeros(n_bins_continuous - 1, 1)];
         predictor = conv(signal_padded, continuous_kernel, 'valid');
         % Smooth and normalize
         predictor_smoothed = smoothdata(predictor, 'gaussian', round(config.smooth_window/config.bin_size));
