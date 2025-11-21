@@ -50,42 +50,16 @@ n_lambda = length(lambda_grid);
 
 % Check if cross-validation should be skipped
 if cv_folds == 1
-    % No cross-validation: fit each lambda once on full dataset
-    fprintf('Testing %d lambda values (no cross-validation)...\n', n_lambda);
+    % Skip cross-validation: use first lambda value
+    lambda_opt = lambda_grid(1);
+    fprintf('Skipping cross-validation (cv_folds = 1)\n');
+    fprintf('Using lambda = %.2e\n', lambda_opt);
 
-    cv_logli_mean = zeros(n_lambda, 1);
-
-    for i = 1:n_lambda
-        lambda = lambda_grid(i);
-
-        % Fit on full dataset
-        w0 = zeros(n_predictors, 1);
-        lossfun = @(w) negLogLikelihood_Poisson_grad(w, X, y, lambda);
-        w_fit = fminunc(lossfun, w0, opts);
-
-        % Evaluate likelihood on full dataset (no regularization penalty)
-        Xw = X * w_fit;
-        rate = exp(Xw);
-        logli = sum(y .* Xw - rate);  % Positive log-likelihood
-
-        cv_logli_mean(i) = logli;
-
-        if mod(i, 5) == 0 || i == n_lambda
-            fprintf('  Lambda %d/%d: %.2e, log-likelihood: %.2f\n', ...
-                i, n_lambda, lambda, cv_logli_mean(i));
-        end
-    end
-
-    % Select optimal lambda (maximum log-likelihood)
-    [max_logli, best_idx] = max(cv_logli_mean);
-    lambda_opt = lambda_grid(best_idx);
-
-    fprintf('\n✓ Optimal lambda: %.2e (log-likelihood: %.2f)\n', ...
-        lambda_opt, cv_logli_mean(best_idx));
-
-    % Initialize empty CV-specific results
+    % Initialize empty CV results
     cv_logli = [];
+    cv_logli_mean = [];
     cv_logli_se = [];
+    best_idx = 1;
 else
     % Initialize CV results
     cv_logli = zeros(n_lambda, cv_folds);
