@@ -3,13 +3,16 @@
 %  ========================================================================
 %
 %  Fits 4 nested Poisson GLMs to disentangle neural encoding:
-%    Model 1: Spike History only (autoregressive baseline)
-%    Model 2: Spike History + Events (IR1ON, IR2ON, Aversive Sound)
-%    Model 3: Spike History + Events + Speed
-%    Model 4: Spike History + Events + Speed + Breathing 8Hz
+%    Model 1: Events only (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
+%    Model 2: Events + Kinematics (X,Y,Z speeds + coordinates + 2D XY & 1D Z spatial kernels)
+%    Model 3: Events + Kinematics + Breathing 8Hz
+%    Model 4: Events + Kinematics + Breathing + Spike History
 %
 %  Features:
-%    - Raised cosine log-stretched basis for event predictors
+%    - Symmetric Gaussian kernel (-2~2 sec) for reward events (IR1/2ON, WP1/2ON)
+%    - Raised cosine basis (0~2 sec) for aversive events
+%    - Continuous kinematics with -1~1 sec kernel (X,Y,Z speeds & coordinates)
+%    - 2D XY spatial kernel (10x10 grid) and 1D Z spatial kernel (5 bins)
 %    - Processes ALL units across all sessions
 %    - Computes deviance explained for model comparison
 %    - Saves results for integration with existing pipeline
@@ -32,12 +35,22 @@ config = struct();
 config.bin_size = 0.05;                 % 50 ms bins
 config.unit_of_time = 's';
 
-% Raised cosine basis parameters
-config.basis_type = 'raised_cosine';
+% Event kernel parameters
+% IR1ON, IR2ON, WP1ON, WP2ON: Symmetric Gaussian kernel
+config.reward_kernel_type = 'gaussian';
+config.reward_window_pre = 2.0;         % 2s pre-event
+config.reward_window_post = 2.0;        % 2s post-event
+config.reward_gaussian_std = 0.5;       % Standard deviation for Gaussian kernel
+
+% Aversive: Raised cosine (causal only)
+config.aversive_kernel_type = 'raised_cosine';
 config.n_basis_funcs = 10;              % Number of basis functions
-config.event_window_pre = 0;            % No pre-event window (causal only)
-config.event_window_post = 2.0;         % 2s post-event
+config.aversive_window_pre = 0;         % No pre-event window (causal only)
+config.aversive_window_post = 2.0;      % 2s post-event
 config.basis_stretch = 0.1;             % Log-stretching parameter
+
+% Continuous predictor kernel (-1 to +1 sec)
+config.continuous_window = 1.0;         % ±1s window for continuous predictors
 
 % Continuous predictor smoothing
 config.smooth_window = 0.2;             % 200 ms smoothing
@@ -74,8 +87,11 @@ addpath('/Users/hsiehkunlin/Desktop/Matlab_scripts/reorganize/behclassification/
 
 fprintf('Configuration:\n');
 fprintf('  Bin size: %d ms\n', config.bin_size * 1000);
-fprintf('  Basis functions: %d raised cosine (log-stretched)\n', config.n_basis_funcs);
-fprintf('  Event window: 0 to +%d ms\n', config.event_window_post * 1000);
+fprintf('  Reward events (IR/WP): Gaussian kernel [-%d, +%d] ms, std=%.1f s\n', ...
+    config.reward_window_pre * 1000, config.reward_window_post * 1000, config.reward_gaussian_std);
+fprintf('  Aversive events: %d raised cosine basis [0, +%d] ms\n', ...
+    config.n_basis_funcs, config.aversive_window_post * 1000);
+fprintf('  Continuous predictors: ±%d ms window\n', config.continuous_window * 1000);
 fprintf('  Breathing band: %.1f-%.1f Hz\n', config.breathing_band(1), config.breathing_band(2));
 fprintf('  Fitting method: Robust (GLMspiketools-style)\n');
 fprintf('  Regularization: %s\n\n', mat2str(config.use_regularization));
@@ -119,7 +135,7 @@ for session_type_idx = 1:2
         % Load session data
         Timelimits = 'No';
         try
-            [NeuralTime, ~, AdjustedXYZ_speed, Signal, IR1ON, IR2ON, ~, ~, ...
+            [NeuralTime, AdjustedXYZ, AdjustedXYZ_speed, Signal, IR1ON, IR2ON, WP1ON, WP2ON, ...
              AversiveSound, ~, valid_spikes, Fs, ~] = ...
                 loadAndPrepareSessionData(allfiles(sess_idx), T_sorted, Timelimits);
         catch ME
@@ -133,12 +149,12 @@ for session_type_idx = 1:2
         % Build design matrices for all 4 models
         fprintf('  Building design matrices...\n');
         [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
-            NeuralTime, IR1ON, IR2ON, AversiveSound, AdjustedXYZ_speed, Signal, Fs, config);
+            NeuralTime, IR1ON, IR2ON, WP1ON, WP2ON, AversiveSound, AdjustedXYZ, AdjustedXYZ_speed, Signal, Fs, config);
 
         fprintf('    Model 1: %d predictors (events only)\n', size(DM1, 2));
-        fprintf('    Model 2: %d predictors (events + speed)\n', size(DM2, 2));
-        fprintf('    Model 3: %d predictors (events + speed + breathing)\n', size(DM3, 2));
-        fprintf('    Model 4: %d predictors (full model + history)\n', size(DM3, 2) + config.history_lags);
+        fprintf('    Model 2: %d predictors (events + kinematics)\n', size(DM2, 2));
+        fprintf('    Model 3: %d predictors (events + kinematics + breathing)\n', size(DM3, 2));
+        fprintf('    Model 4: %d predictors (full model + spike history)\n', size(DM3, 2) + config.history_lags);
 
         % Process each unit
         for unit_idx = 1:n_units
@@ -224,14 +240,14 @@ dev_model3 = mean(arrayfun(@(s) s.model3.deviance_explained, all_results));
 dev_model4 = mean(arrayfun(@(s) s.model4.deviance_explained, all_results));
 
 fprintf('Average Deviance Explained:\n');
-fprintf('  Model 1 (Events):                      %.2f%%\n', dev_model1);
-fprintf('  Model 2 (Events + Speed):              %.2f%%\n', dev_model2);
-fprintf('  Model 3 (Events + Speed + Breathing):  %.2f%%\n', dev_model3);
-fprintf('  Model 4 (Full + History):              %.2f%%\n', dev_model4);
+fprintf('  Model 1 (Events):                          %.2f%%\n', dev_model1);
+fprintf('  Model 2 (Events + Kinematics):             %.2f%%\n', dev_model2);
+fprintf('  Model 3 (Events + Kinematics + Breathing): %.2f%%\n', dev_model3);
+fprintf('  Model 4 (Full + Spike History):            %.2f%%\n', dev_model4);
 fprintf('\nAverage Improvement:\n');
-fprintf('  Speed adds:                            %.2f%%\n', dev_model2 - dev_model1);
-fprintf('  Breathing adds:                        %.2f%%\n', dev_model3 - dev_model2);
-fprintf('  Spike history adds:                    %.2f%%\n', dev_model4 - dev_model3);
+fprintf('  Kinematics adds:                           %.2f%%\n', dev_model2 - dev_model1);
+fprintf('  Breathing adds:                            %.2f%%\n', dev_model3 - dev_model2);
+fprintf('  Spike history adds:                        %.2f%%\n', dev_model4 - dev_model3);
 
 fprintf('\nDone!\n');
 
@@ -241,13 +257,13 @@ fprintf('\nDone!\n');
 %% ========================================================================
 
 function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
-    NeuralTime, IR1ON, IR2ON, AversiveSound, Speed, Signal, Fs, config)
+    NeuralTime, IR1ON, IR2ON, WP1ON, WP2ON, AversiveSound, AdjustedXYZ, Speed, Signal, Fs, config)
 % Build 3 nested design matrices (Model 4 adds spike history per-unit)
 %
-% Model 1: Events only
-% Model 2: Events + Speed
-% Model 3: Events + Speed + Breathing 8Hz
-% Model 4: Events + Speed + Breathing + Spike History (added in fitNestedModels)
+% Model 1: Events only (IR1ON, IR2ON, WP1ON, WP2ON with Gaussian; Aversive with raised cosine)
+% Model 2: Events + Kinematics (X,Y,Z speeds + X,Y,Z coordinates + spatial kernels)
+% Model 3: Events + Kinematics + Breathing 8Hz
+% Model 4: Events + Kinematics + Breathing + Spike History (added in fitNestedModels)
 
     % Create time bins
     t_start = NeuralTime(1);
@@ -258,49 +274,36 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
 
     %% 1. EVENT PREDICTORS (shared by all models)
 
-    event_signals = {IR1ON, IR2ON, AversiveSound};
-    event_names = {'IR1ON', 'IR2ON', 'Aversive'};
+    % Reward events: IR1ON, IR2ON, WP1ON, WP2ON (Gaussian kernel -2~2 sec)
+    reward_events = {IR1ON, IR2ON, WP1ON, WP2ON};
+    reward_names = {'IR1ON', 'IR2ON', 'WP1ON', 'WP2ON'};
 
-    % Create raised cosine basis
-    n_basis = config.n_basis_funcs;
-    n_bins_pre = round(config.event_window_pre / config.bin_size);
-    n_bins_post = round(config.event_window_post / config.bin_size);
-    event_duration_bins = n_bins_pre + n_bins_post;
+    % Create Gaussian kernel for reward events
+    n_bins_pre_reward = round(config.reward_window_pre / config.bin_size);
+    n_bins_post_reward = round(config.reward_window_post / config.bin_size);
+    gaussian_kernel = createGaussianKernel(n_bins_pre_reward, n_bins_post_reward, ...
+        config.bin_size, config.reward_gaussian_std);
 
-    basis_funcs = createRaisedCosineBasis(n_basis, event_duration_bins, ...
-        config.bin_size, config.basis_stretch);
+    % Convolve reward events with Gaussian kernel
+    reward_predictors = [];
+    for ev = 1:length(reward_events)
+        event_signal = reward_events{ev};
+        event_name = reward_names{ev};
 
-    % Convolve events with basis
-    event_predictors = [];
-    for ev = 1:length(event_signals)
-        event_signal = event_signals{ev};
-        event_name = event_names{ev};
-
-        % Find onsets based on event type
-        if strcmp(event_name, 'Aversive')
-            % Aversive: Use individual onsets
-            event_onset_indices = find(diff([0; event_signal(:)]) == 1);
-            if ~isempty(event_onset_indices)
-                event_times_to_use = NeuralTime(event_onset_indices);
-            else
-                event_times_to_use = [];
+        % Use bout detection for reward events
+        event_onset_indices = find(event_signal == 1);
+        if ~isempty(event_onset_indices)
+            event_times_raw = NeuralTime(event_onset_indices);
+            try
+                [bout_starts, ~] = findEventCluster_SuperFast(event_times_raw, ...
+                    config.bout_epsilon, config.bout_minPts);
+                event_times_to_use = bout_starts;
+            catch
+                % Fall back to individual events if bout detection fails
+                event_times_to_use = event_times_raw;
             end
         else
-            % Reward events (IR1ON, IR2ON): Use bout detection
-            event_onset_indices = find(event_signal == 1);
-            if ~isempty(event_onset_indices)
-                event_times_raw = NeuralTime(event_onset_indices);
-                try
-                    [bout_starts, ~] = findEventCluster_SuperFast(event_times_raw, ...
-                        config.bout_epsilon, config.bout_minPts);
-                    event_times_to_use = bout_starts;
-                catch
-                    % Fall back to individual events if bout detection fails
-                    event_times_to_use = event_times_raw;
-                end
-            else
-                event_times_to_use = [];
-            end
+            event_times_to_use = [];
         end
 
         % Create event indicator
@@ -310,14 +313,47 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
             event_indicator = event_counts;
         end
 
-        % Convolve with each basis function
-        for b = 1:n_basis
-            kernel = basis_funcs(:, b);
-            event_padded = [zeros(n_bins_pre, 1); event_indicator; zeros(n_bins_post - 1, 1)];
-            predictor = conv(event_padded, kernel, 'valid');
-            event_predictors = [event_predictors, predictor];
-        end
+        % Convolve with Gaussian kernel
+        event_padded = [zeros(n_bins_pre_reward, 1); event_indicator; zeros(n_bins_post_reward - 1, 1)];
+        predictor = conv(event_padded, gaussian_kernel, 'valid');
+        reward_predictors = [reward_predictors, predictor];
     end
+
+    % Aversive event: raised cosine basis (0~2 sec, causal only)
+    n_basis = config.n_basis_funcs;
+    n_bins_pre_aversive = round(config.aversive_window_pre / config.bin_size);
+    n_bins_post_aversive = round(config.aversive_window_post / config.bin_size);
+    aversive_duration_bins = n_bins_pre_aversive + n_bins_post_aversive;
+
+    basis_funcs = createRaisedCosineBasis(n_basis, aversive_duration_bins, ...
+        config.bin_size, config.basis_stretch);
+
+    % Find aversive onsets
+    event_onset_indices = find(diff([0; AversiveSound(:)]) == 1);
+    if ~isempty(event_onset_indices)
+        aversive_times = NeuralTime(event_onset_indices);
+    else
+        aversive_times = [];
+    end
+
+    % Create aversive event indicator
+    aversive_indicator = zeros(n_bins, 1);
+    if ~isempty(aversive_times)
+        aversive_counts = histcounts(aversive_times, time_bins)';
+        aversive_indicator = aversive_counts;
+    end
+
+    % Convolve aversive with raised cosine basis functions
+    aversive_predictors = [];
+    for b = 1:n_basis
+        kernel = basis_funcs(:, b);
+        aversive_padded = [zeros(n_bins_pre_aversive, 1); aversive_indicator; zeros(n_bins_post_aversive - 1, 1)];
+        predictor = conv(aversive_padded, kernel, 'valid');
+        aversive_predictors = [aversive_predictors, predictor];
+    end
+
+    % Combine all event predictors
+    event_predictors = [reward_predictors, aversive_predictors];
 
     % Z-score all event predictors for numerical stability and interpretability
     for col = 1:size(event_predictors, 2)
@@ -326,13 +362,92 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
         end
     end
 
-    %% 2. SPEED PREDICTOR
+    %% 2. KINEMATICS PREDICTORS (with -1~1 sec kernel)
 
-    speed_binned = binContinuousSignal(Speed, NeuralTime, time_centers);
-    speed_smoothed = smoothdata(speed_binned, 'gaussian', round(config.smooth_window/config.bin_size));
-    speed_normalized = zscore(speed_smoothed);
+    % Extract X, Y, Z coordinates
+    X_coord = AdjustedXYZ(:, 1);
+    Y_coord = AdjustedXYZ(:, 2);
+    Z_coord = AdjustedXYZ(:, 3);
 
-    %% 3. BREATHING 8Hz AMPLITUDE
+    % Compute X, Y, Z speeds (derivatives)
+    dt = diff(NeuralTime);
+    dt(dt == 0) = mean(dt(dt > 0));  % Handle any zero time steps
+
+    X_speed = [0; diff(X_coord) ./ dt];
+    Y_speed = [0; diff(Y_coord) ./ dt];
+    Z_speed = [0; diff(Z_coord) ./ dt];
+
+    % Bin continuous signals
+    X_coord_binned = binContinuousSignal(X_coord, NeuralTime, time_centers);
+    Y_coord_binned = binContinuousSignal(Y_coord, NeuralTime, time_centers);
+    Z_coord_binned = binContinuousSignal(Z_coord, NeuralTime, time_centers);
+
+    X_speed_binned = binContinuousSignal(X_speed, NeuralTime, time_centers);
+    Y_speed_binned = binContinuousSignal(Y_speed, NeuralTime, time_centers);
+    Z_speed_binned = binContinuousSignal(Z_speed, NeuralTime, time_centers);
+
+    % Create -1~1 sec kernel for continuous predictors
+    n_bins_continuous = round(config.continuous_window / config.bin_size);
+    continuous_kernel = createGaussianKernel(n_bins_continuous, n_bins_continuous, ...
+        config.bin_size, config.smooth_window);
+
+    % Convolve continuous signals with kernel
+    kinematics_predictors = [];
+    continuous_signals = {X_speed_binned, Y_speed_binned, Z_speed_binned, ...
+                          X_coord_binned, Y_coord_binned, Z_coord_binned};
+    continuous_names = {'X_speed', 'Y_speed', 'Z_speed', 'X_coord', 'Y_coord', 'Z_coord'};
+
+    for i = 1:length(continuous_signals)
+        signal = continuous_signals{i};
+        % Pad and convolve
+        signal_padded = [zeros(n_bins_continuous, 1); signal; zeros(n_bins_continuous - 1, 1)];
+        predictor = conv(signal_padded, continuous_kernel, 'valid');
+        % Smooth and normalize
+        predictor_smoothed = smoothdata(predictor, 'gaussian', round(config.smooth_window/config.bin_size));
+        predictor_normalized = zscore(predictor_smoothed);
+        kinematics_predictors = [kinematics_predictors, predictor_normalized];
+    end
+
+    %% 3. SPATIAL KERNELS
+
+    % 2D XY spatial kernel (position-dependent tuning)
+    % Create spatial grid
+    n_spatial_bins_xy = 10;  % 10x10 grid
+    x_edges = linspace(min(X_coord), max(X_coord), n_spatial_bins_xy + 1);
+    y_edges = linspace(min(Y_coord), max(Y_coord), n_spatial_bins_xy + 1);
+
+    % Bin XY positions
+    [~, ~, x_bin_idx] = histcounts(X_coord_binned, x_edges);
+    [~, ~, y_bin_idx] = histcounts(Y_coord_binned, y_edges);
+
+    % Create one-hot encoding for 2D spatial bins
+    xy_spatial_predictors = zeros(n_bins, n_spatial_bins_xy * n_spatial_bins_xy);
+    for i = 1:n_bins
+        if x_bin_idx(i) > 0 && y_bin_idx(i) > 0
+            spatial_idx = (y_bin_idx(i) - 1) * n_spatial_bins_xy + x_bin_idx(i);
+            xy_spatial_predictors(i, spatial_idx) = 1;
+        end
+    end
+
+    % 1D Z spatial kernel (height-dependent tuning)
+    n_spatial_bins_z = 5;  % 5 vertical bins
+    z_edges = linspace(min(Z_coord), max(Z_coord), n_spatial_bins_z + 1);
+
+    % Bin Z positions
+    [~, ~, z_bin_idx] = histcounts(Z_coord_binned, z_edges);
+
+    % Create one-hot encoding for 1D Z spatial bins
+    z_spatial_predictors = zeros(n_bins, n_spatial_bins_z);
+    for i = 1:n_bins
+        if z_bin_idx(i) > 0
+            z_spatial_predictors(i, z_bin_idx(i)) = 1;
+        end
+    end
+
+    % Combine spatial predictors
+    spatial_predictors = [xy_spatial_predictors, z_spatial_predictors];
+
+    %% 4. BREATHING 8Hz AMPLITUDE
 
     breathing_8Hz = zeros(n_bins, 1);
     if ~isempty(Signal) && Fs > 0
@@ -353,37 +468,58 @@ function [DM1, DM2, DM3, predictor_info] = buildNestedDesignMatrices(...
         breathing_8Hz = zscore(amplitude_smoothed);
     end
 
-    %% 4. ASSEMBLE NESTED MODELS
+    %% 5. ASSEMBLE NESTED MODELS
 
     % Model 1: Bias + Events
     DM1 = [ones(n_bins, 1), event_predictors];
 
-    % Model 2: Bias + Events + Speed
-    DM2 = [ones(n_bins, 1), event_predictors, speed_normalized(:)];
+    % Model 2: Bias + Events + Kinematics (speeds + coordinates + spatial kernels)
+    DM2 = [ones(n_bins, 1), event_predictors, kinematics_predictors, spatial_predictors];
 
-    % Model 3: Bias + Events + Speed + Breathing
-    DM3 = [ones(n_bins, 1), event_predictors, speed_normalized(:), breathing_8Hz(:)];
+    % Model 3: Bias + Events + Kinematics + Breathing
+    DM3 = [ones(n_bins, 1), event_predictors, kinematics_predictors, spatial_predictors, breathing_8Hz(:)];
 
-    %% 5. PREDICTOR INFO
+    %% 6. PREDICTOR INFO
 
     predictor_info = struct();
     predictor_info.time_bins = time_bins;
     predictor_info.time_centers = time_centers;
-    predictor_info.event_names = event_names;
-    predictor_info.n_basis = n_basis;
-    predictor_info.n_events = length(event_names);
 
-    % Predictor names for Model 3 (full)
+    % Predictor names for Model 3 (full model)
     predictor_names = {'Bias'};
-    for ev = 1:length(event_names)
-        for b = 1:n_basis
-            predictor_names{end+1} = sprintf('%s_basis%d', event_names{ev}, b);
-        end
+
+    % Reward event predictors (Gaussian kernel, one predictor per event)
+    for ev = 1:length(reward_names)
+        predictor_names{end+1} = sprintf('%s_Gaussian', reward_names{ev});
     end
-    predictor_names{end+1} = 'Speed';
+
+    % Aversive event predictors (raised cosine basis)
+    for b = 1:n_basis
+        predictor_names{end+1} = sprintf('Aversive_basis%d', b);
+    end
+
+    % Kinematics predictors
+    for i = 1:length(continuous_names)
+        predictor_names{end+1} = continuous_names{i};
+    end
+
+    % Spatial predictors
+    for i = 1:n_spatial_bins_xy * n_spatial_bins_xy
+        predictor_names{end+1} = sprintf('XY_spatial_%d', i);
+    end
+    for i = 1:n_spatial_bins_z
+        predictor_names{end+1} = sprintf('Z_spatial_%d', i);
+    end
+
+    % Breathing
     predictor_names{end+1} = 'Breathing_8Hz';
 
     predictor_info.predictor_names = predictor_names;
+    predictor_info.reward_event_names = reward_names;
+    predictor_info.continuous_names = continuous_names;
+    predictor_info.n_spatial_bins_xy = n_spatial_bins_xy;
+    predictor_info.n_spatial_bins_z = n_spatial_bins_z;
+    predictor_info.n_aversive_basis = n_basis;
 end
 
 function basis = createRaisedCosineBasis(n_basis, n_bins, bin_size, stretch_param)
@@ -425,6 +561,28 @@ function basis = createRaisedCosineBasis(n_basis, n_bins, bin_size, stretch_para
     end
 end
 
+
+function kernel = createGaussianKernel(n_bins_pre, n_bins_post, bin_size, sigma)
+% Create a symmetric Gaussian kernel
+%
+% Inputs:
+%   n_bins_pre:  Number of bins before event
+%   n_bins_post: Number of bins after event
+%   bin_size:    Size of each bin (seconds)
+%   sigma:       Standard deviation of Gaussian (seconds)
+%
+% Output:
+%   kernel: [(n_bins_pre + n_bins_post) × 1] Gaussian kernel
+
+    total_bins = n_bins_pre + n_bins_post;
+    t_vec = ((-n_bins_pre):(n_bins_post-1))' * bin_size;
+
+    % Create Gaussian centered at t=0
+    kernel = exp(-(t_vec.^2) / (2 * sigma^2));
+
+    % Normalize to sum to 1
+    kernel = kernel / sum(kernel);
+end
 
 function binned_signal = binContinuousSignal(signal, time_stamps, bin_centers)
 % Bin a continuous signal into specified time bins (VECTORIZED)
