@@ -393,9 +393,10 @@ end
 
 function basis = createRaisedCosineBasis(n_basis, n_bins)
 % Create raised cosine basis functions (same as in main script)
+% Fix: Ensure first peak is at or near t=1 (event onset) to capture immediate response
 
-    peaks = logspace(log10(1), log10(n_bins), n_basis);
-    width = (log10(n_bins) - log10(1)) / (n_basis - 1) * 2;
+    peaks = logspace(log10(0.5), log10(n_bins), n_basis);  % Start from 0.5 for better coverage at onset
+    width = (log10(n_bins) - log10(0.5)) / (n_basis - 1) * 2;
 
     basis = zeros(n_bins, n_basis);
 

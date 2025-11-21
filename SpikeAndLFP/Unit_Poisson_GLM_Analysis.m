@@ -681,11 +681,12 @@ function basis = createRaisedCosineBasis(n_basis, n_bins, bin_size, stretch_para
     window_duration = (n_bins - 1) * bin_size;
 
     % Logarithmically spaced peaks
+    % Fix: Ensure first peak is at t=0 to capture immediate response
     log_min = log(stretch_param);
     log_max = log(window_duration + stretch_param);
-    log_peaks = linspace(log_min, log_max, n_basis + 2);
+    log_peaks = linspace(log_min, log_max, n_basis + 1);
     peaks = exp(log_peaks) - stretch_param;
-    peaks = peaks(2:end-1);  % Remove boundary peaks
+    peaks = peaks(1:n_basis);  % Take first n_basis peaks (first peak at ~0)
 
     % Width of each cosine bump
     widths = diff(exp(log_peaks));
