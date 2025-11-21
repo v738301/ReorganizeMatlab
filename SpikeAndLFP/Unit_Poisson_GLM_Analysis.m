@@ -607,9 +607,21 @@ function [DM1, DM2, DM3, DM4, predictor_info] = buildNestedDesignMatrices(...
     predictor_info.time_bins = time_bins;
     predictor_info.time_centers = time_centers;
 
+    % Spike history information (added in fitNestedModels_robust)
+    predictor_info.history_lags = config.history_lags;
+    predictor_info.history_window_ms = config.history_lags * config.bin_size * 1000;
+
     % Predictor names for Model 5 (full model)
     % Note: Bias and spike history are added in fitNestedModels_robust
     predictor_names = {};
+
+    % Add bias (intercept) name
+    predictor_names{end+1} = 'Intercept';
+
+    % Add spike history lag names
+    for lag = 1:config.history_lags
+        predictor_names{end+1} = sprintf('SpikeHistory_lag%d', lag);
+    end
 
     % Reward event predictors (24 Gaussian basis kernels per event)
     for ev = 1:length(reward_names)
