@@ -1110,13 +1110,14 @@ function basis = createRaisedCosineBasis(n_basis, n_bins, bin_size, stretch_para
 
     % Define logarithmically spaced peak positions
     % Map peaks from log-space to linear time
+    % Fix: Ensure first peak is at t=0 to capture immediate response
     log_min = log(stretch_param);
     log_max = log(window_duration + stretch_param);
-    log_peaks = linspace(log_min, log_max, n_basis + 2);  % +2 for boundary peaks
+    log_peaks = linspace(log_min, log_max, n_basis + 1);
     peaks = exp(log_peaks) - stretch_param;  % Convert back to linear time
 
-    % Remove boundary peaks (we only use interior peaks)
-    peaks = peaks(2:end-1);
+    % Take first n_basis peaks (first peak at ~0)
+    peaks = peaks(1:n_basis);
 
     % Width of each cosine bump (distance between peaks)
     widths = diff(exp(log_peaks));
