@@ -106,6 +106,12 @@ catch ME
     return;
 end
 
+%% bad sessions (with bad breathing recording)
+% '2025-07-09_15-16-04-RK02-RewardAversive-withbreathing_AllStruct_NeuralTime.mat'
+% '2025-07-12_15-34-53-RK02-RewardAversive-withbreathing_AllStruct_NeuralTime.mat'
+% '2025-07-08_14-19-00-RK02-RewardSeeking-withbreathing_AllStruct_NeuralTime.mat'
+% '2025-07-11_16-10-40-RK02-RewardSeeking-withbreathing_AllStruct_NeuralTime.mat'
+
 %% ========================================================================
 %  SECTION 4: PROCESS AVERSIVE SESSIONS
 %  ========================================================================
